@@ -1,0 +1,1962 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>WaitPlay - Игровая Платформа Развлечений</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <meta name="theme-color" content="#0b0a13">
+  <link rel="stylesheet" href="style.css?v=17.2.0">
+  <script src="app.js?v=17.2.0"></script>
+  <script>
+    // Force unregister any stale service workers & purge CacheStorage
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (let registration of registrations) {
+          registration.unregister();
+        }
+      });
+    }
+    if ('caches' in window) {
+      caches.keys().then(function(names) {
+        for (let name of names) {
+          caches.delete(name);
+        }
+      });
+    }
+  </script>
+  <script>
+    window.addEventListener('error', function(e) {
+      if (e.message === 'Script error.' || !e.filename) return;
+      console.warn("Global Error:", e.message);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      console.warn("Unhandled Rejection:", e.reason);
+    });
+  </script>
+</head>
+<body>
+
+  <!-- 1. OWNER SYSTEM EMAIL SIMULATOR (Push alert inbox mock) -->
+  <div id="owner-email-alert-modal" class="modal-overlay" style="z-index: 10005;">
+    <div class="modal-content" style="border: 2px solid var(--error); background: #160c18; max-width: 380px;">
+      <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-light); padding-bottom: 6px; margin-bottom: 8px;">
+        📧 Входящее письмо: Оповещение безопасности WaitPlay
+      </div>
+      <h3 style="color: var(--error); font-weight: 800; font-size: 14px; margin-bottom: 10px;">
+        🚨 Обнаружена попытка входа вне радиуса заведения
+      </h3>
+      <p style="font-size: 11px; line-height: 1.4; color: #fca5a5; margin-bottom: 15px;" id="owner-email-alert-body">
+        Кто-то пытается привязать новое устройство к аккаунту вашего заведения. Второе устройство находится далеко от ресторана.
+      </p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" onclick="app.ownerApproveMigrationMe()" style="flex:1; font-size:11px; padding:8px;">
+          Это я (Разрешить)
+        </button>
+        <button class="btn btn-danger" onclick="app.ownerTriggerPasswordReset()" style="flex:1; font-size:11px; padding:8px;">
+          Сменить пароль
+        </button>
+      </div>
+      <button class="btn btn-secondary" onclick="document.getElementById('owner-email-alert-modal').classList.remove('active')" style="margin-top:10px; font-size:10px; padding:5px;">
+        Закрыть окно
+      </button>
+    </div>
+  </div>
+
+  <!-- 2. SUPPORT & ACCOUNTS RECOVERY PORTAL MODAL -->
+  <div id="support-portal-modal" class="modal-overlay" style="z-index: 10000;">
+    <div class="modal-content" style="border: 1px solid var(--primary-glow); max-width: 360px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-light); padding-bottom:6px; margin-bottom:12px;">
+        <span style="font-weight:700; font-size:12px; color:var(--primary);">💬 Портал поддержки WaitPlay</span>
+        <button onclick="app.closeSupportPortal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px;">✕</button>
+      </div>
+
+      <!-- Mode Tabs -->
+      <div style="display:flex; gap:10px; border-bottom:1px solid var(--border-light); margin-bottom:12px; padding-bottom:5px;">
+        <button id="btn-support-mode-recovery" style="flex:1; background:none; border:none; color:var(--gold); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setSupportMode('recovery')">
+          🔒 Восстановление
+        </button>
+        <button id="btn-support-mode-feedback" style="flex:1; background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setSupportMode('feedback')">
+          💡 Идея / Отзыв
+        </button>
+      </div>
+
+      <!-- Recovery Steps Container -->
+      <div id="support-recovery-steps-container">
+        <!-- Support Step 1: Credentials Form -->
+        <div id="support-step-1" class="support-step-view active">
+          <p style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:10px;">
+            Если ваш аккаунт был взломан или устройство украдено, введите ваш регистрационный Email и опишите проблему для отправки заявки Разработчикам.
+          </p>
+          <div class="form-group" style="margin-bottom:8px;">
+            <label>Первоначальный Email регистрации</label>
+            <input type="email" id="support-verify-email" placeholder="example@mail.com">
+          </div>
+          <div class="form-group" style="margin-bottom:15px;">
+            <label>Причина обращения или описание</label>
+            <textarea id="support-recovery-reason" placeholder="Опишите кратко причину (например: украли телефон, смена управляющего)..." style="width: 100%; height: 60px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-light); border-radius: 8px; color: #fff; padding: 6px; font-size: 11px; font-family: inherit; resize: none;"></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="app.supportSubmitCredentials()">
+            📨 Отправить заявку Разработчикам
+          </button>
+        </div>
+
+        <!-- Support Step 4: Success message -->
+        <div id="support-step-4" class="support-step-view" style="text-align:center; padding:10px 0; display:none;">
+          <span style="font-size:32px;">✔️</span>
+          <h4 style="font-size:14px; font-weight:700; color:var(--success); margin:8px 0;">Заявка принята</h4>
+          <p style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:12px;">
+            Ваша заявка отправлена Разработчикам платформы. 
+            <br><br>
+            Разработчик свяжется с вами по указанному Email и поможет восстановить доступ при первой возможности!
+          </p>
+          <button class="btn btn-secondary" onclick="app.closeSupportPortal()">Закрыть</button>
+        </div>
+      </div>
+
+      <!-- Support Feedback Form (Suggestions) -->
+      <div id="support-feedback-form" style="display:none;">
+        <p style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:10px;">
+          У вас есть идея по улучшению платформы или отзыв? Напишите Разработчикам напрямую, и мы постараемся её реализовать в следующих обновлениях!
+        </p>
+        <div class="form-group">
+          <label>Ваш Email для обратной связи</label>
+          <input type="email" id="support-feedback-email" placeholder="example@mail.com">
+        </div>
+        <div class="form-group" style="margin-bottom:15px;">
+          <label>Текст вашего отзыва или предложения</label>
+          <textarea id="support-feedback-text" placeholder="Напишите здесь ваше предложение..." style="width: 100%; height: 90px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-light); border-radius: 8px; color: #fff; padding: 8px; font-size: 11px; font-family: inherit; resize: none;"></textarea>
+        </div>
+        <button class="btn btn-pro" onclick="app.supportSubmitFeedback()">
+          💡 Отправить Разработчикам
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="workspace-wrapper">
+    
+    <!-- DEVICE 1: VENUE ADMIN PANEL -->
+    <div class="phone-frame">
+      <div class="screen">
+        
+        <!-- HEADER -->
+        <header>
+          <div class="logo-container" onclick="app.resetAdminDevice()">
+            <div class="logo-icon">W</div>
+            <div class="logo-text">WaitPlay</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+          </div>
+        </header>
+
+        <!-- VIEW 0: WELCOME & ENTRANCE PANEL -->
+        <div id="admin-welcome-choice-panel" class="view-panel active" style="justify-content: center; min-height: 100%; padding: 20px 0; box-sizing: border-box;">
+          <div style="text-align: center; margin-bottom: 25px;">
+            <span style="font-size: 52px;">🎮</span>
+            <h2 class="section-title" style="justify-content: center; font-size: 20px; color: var(--gold); margin-top:12px;">Добро пожаловать в WaitPlay</h2>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top:6px; text-align:center;">Универсальная бесплатная игровая платформа</p>
+          </div>
+
+          <div style="margin-top: 15px;">
+            <button class="btn btn-primary" style="width:100%; padding: 18px; font-size:16px; font-weight:800; border-radius:16px; box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);" onclick="app.consentAccept()">
+              Войти 🚀
+            </button>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 14px; text-align: center; line-height: 1.4;">
+              Используя сервис, вы соглашаетесь с Условиями использования WaitPlay
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 1.5A: REGISTRATION STEP 1 - EMAIL CONFIRMATION -->
+        <div id="admin-reg-email-panel" class="view-panel">
+          <h2 class="section-title">Шаг 1: Подтверждение Email</h2>
+          <p class="section-subtitle">Пожалуйста, введите ваш адрес почты для создания профиля.</p>
+
+          <div class="form-group" id="reg-email-input-group">
+            <label>Адрес электронной почты</label>
+            <input type="email" id="reg-email" placeholder="owner@mail.com">
+            <button class="btn btn-primary" style="margin-top: 10px;" onclick="app.regSendEmailCode()">Получить проверочный код 📧</button>
+          </div>
+
+          <div id="reg-email-code-group" style="display: none; text-align: center; margin-top: 10px;">
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">Введите 4-значный код, присланный на почту:</p>
+            <div class="verification-code-container">
+              <input type="text" maxlength="4" class="code-char-input" id="reg-email-code-input" style="width: 120px;">
+            </div>
+            <div class="timer-display-box" id="reg-email-timer">03:00</div>
+            <button class="btn btn-primary" onclick="app.regVerifyEmailCode()">Подтвердить почту</button>
+            <div style="margin-top: 12px;">
+              <span class="debug-btn-mini" style="cursor:pointer;" onclick="app.regResendEmailCode()">Выслать код заново</span>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="width: 100%; margin-top: 15px; padding: 10px; font-size: 11px;" onclick="app.setAdminPanelActiveView('welcome-choice')">
+            Назад к выбору 🚪
+          </button>
+        </div>
+
+        <!-- VIEW 1.6: SELECT BRANCH PANEL -->
+        <div id="admin-select-branch-panel" class="view-panel">
+          <h2 class="section-title">Выбор локации</h2>
+          <p class="section-subtitle">Выберите локацию для управления на этом устройстве:</p>
+          
+          <div id="select-branch-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom:15px;">
+            <!-- Populated dynamically by JS -->
+          </div>
+          
+          <button class="btn btn-secondary" style="width:100%;" onclick="app.setAdminPanelActiveView('welcome-choice')">
+            Назад к выбору 🚪
+          </button>
+        </div>
+
+        <!-- VIEW 1.7: ADD BRANCH PANEL -->
+        <div id="admin-add-branch-panel" class="view-panel">
+          <h2 class="section-title" style="color: var(--gold); font-size: 16px;">Название игрового пространства</h2>
+          <p class="section-subtitle" style="font-size: 10px; margin-bottom: 12px;">Укажите название вашей комнаты, зоны или проекта для настройки платформы.</p>
+          
+          <div class="form-group" style="margin-bottom:15px; text-align: left;">
+            <label style="font-size: 11px; font-weight:700; color: #fff; margin-bottom: 6px; display: block;">Название пространства</label>
+            <input type="text" id="add-branch-name" placeholder="Введите название пространства..." style="width: 100%; padding: 14px 16px; font-size: 15px; font-weight: 700; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; background-color: #1c1836 !important; border: 2px solid var(--border-glow); border-radius: 12px; outline: none; box-sizing: border-box; font-family: inherit; caret-color: #f59e0b !important;" oninput="app.checkSpaceNameAvailability(this.value)">
+            <div id="space-name-error-msg" style="display: none; color: #ef4444; font-size: 11px; font-weight: 700; margin-top: 8px; text-align: left;">
+              ⚠️ Пространство с таким названием уже существует! Пожалуйста, укажите другое название.
+            </div>
+          </div>
+
+          <button id="btn-add-branch-submit" class="btn btn-pro" style="width:100%; padding:14px; font-size: 14px; font-weight: 700; border-radius: 14px;" onclick="app.addBranchProceedToPayment()">
+            Создать локацию ➔
+          </button>
+          <button class="btn btn-secondary" style="width:100%; margin-top:8px; padding:10px; font-size: 11px;" onclick="app.cancelAddBranch()">
+            Отмена
+          </button>
+        </div>
+
+        <!-- VIEW 1.5B: REGISTRATION STEP 2 - PHONE CONFIRMATION -->
+        <div id="admin-reg-phone-panel" class="view-panel">
+          <h2 class="section-title">Шаг 2: Подтверждение SMS</h2>
+          <p class="section-subtitle">Пожалуйста, укажите ваш мобильный телефон.</p>
+
+          <div class="form-group" id="reg-phone-input-group">
+            <label>Номер мобильного телефона</label>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <select id="reg-phone-country-code" style="width: 100px; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 8px; padding: 10px 4px; cursor: pointer; font-family: inherit;">
+                <option value="996">🇰🇬 +996 (КГ)</option>
+                <option value="7_kz">🇰🇿 +7 (КЗ)</option>
+                <option value="7_ru">🇷🇺 +7 (РФ)</option>
+                <option value="998">🇺🇿 +998 (УЗ)</option>
+                <option value="375">🇧🇾 +375 (БЛ)</option>
+                <option value="992">🇹🇯 +992 (ТД)</option>
+                <option value="994">🇦🇿 +994 (АЗ)</option>
+                <option value="374">🇦🇲 +374 (АР)</option>
+              </select>
+              <input type="text" id="reg-phone" placeholder="555 123 456" style="flex: 1; padding: 10px; font-size: 12px; margin-bottom: 0;">
+            </div>
+            <button class="btn btn-primary" style="margin-top: 4px;" onclick="app.regSendPhoneCode()">Получить SMS проверочный код 💬</button>
+          </div>
+
+          <div id="reg-phone-code-group" style="display: none; text-align: center; margin-top: 10px;">
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">Введите 4-значный код из SMS сообщения:</p>
+            <div class="verification-code-container">
+              <input type="text" maxlength="4" class="code-char-input" id="reg-phone-code-input" style="width: 120px;">
+            </div>
+            <div class="timer-display-box" id="reg-phone-timer">03:00</div>
+            <button class="btn btn-primary" onclick="app.regVerifyPhoneCode()">Подтвердить телефон</button>
+            <div style="font-size: 9px; color: var(--text-muted); margin-top: 8px; text-align: center;">
+              Для быстрого теста введите код разработчика: <strong style="color: var(--gold);">1234</strong>
+            </div>
+            <div style="margin-top: 12px;">
+              <span class="debug-btn-mini" style="cursor:pointer;" onclick="app.regResendPhoneCode()">Отправить SMS снова</span>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="width: 100%; margin-top: 15px; padding: 10px; font-size: 11px;" onclick="app.setAdminPanelActiveView('reg-email')">
+            Назад к шагу 1 (Email) 📧
+          </button>
+        </div>
+
+        <!-- VIEW 2: BILLING & PAYMENT OPTIONS -->
+        <div id="admin-payment-panel" class="view-panel">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px;">
+            <div>
+              <h2 class="section-title" style="margin: 0;">Выбор тарифа и оплата</h2>
+              <p class="section-subtitle">Выберите подходящую подписку и способ оплаты.</p>
+            </div>
+            <button class="btn btn-secondary" id="btn-payment-back" style="padding: 6px 12px; font-size: 10px; width: auto; display: none; margin-top: 5px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ⬅️ Назад
+            </button>
+          </div>
+          
+          <div id="payment-relocation-warning" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 12px; padding: 10px 14px; font-size: 11px; line-height: 1.4; color: var(--gold); margin-bottom: 15px; display: none;">
+            ⚠️ <strong>Смена локации заведения (Переезд)</strong><br>
+            Вы сможете сменить локацию заведения, сделав новую покупку. Если не хотите, то старые геоданные останутся те же. Если да, вы можете поменять, но ваше текущее местоположение должно быть то место, где вы хотите закрепить новые данные. Регистрационные данные (почта и телефон) изменены не будут.
+          </div>
+
+          <!-- Toggle Billing Term -->
+          <div class="pricing-toggle">
+            <div id="toggle-monthly" class="toggle-option active" onclick="app.setBillingCycle('monthly')">Месяц</div>
+            <div id="toggle-yearly" class="toggle-option" onclick="app.setBillingCycle('yearly')">Год</div>
+          </div>
+
+          <!-- Clickable Plan Cards -->
+          <div class="pricing-cards">
+            <!-- Base Card -->
+            <div class="price-card selected" id="card-base" onclick="app.selectPlan('base')">
+              <div>
+                <div class="price-card-header">БАЗОВАЯ ВЕРСИЯ</div>
+                <div class="price-card-amount" id="price-base-amount">0 <span>сом (Бесплатно)</span></div>
+                <ul class="price-card-features">
+                  <li>6 готовых игр (Викторины и слова)</li>
+                  <li>До 15 игроков в викторинах</li>
+                  <li>Ручное редактирование вопросов</li>
+                </ul>
+              </div>
+              <div class="btn-select-plan">Выбран</div>
+            </div>
+
+            <!-- Pro Card -->
+            <div class="price-card pro" id="card-pro" onclick="app.selectPlan('pro')">
+              <div>
+                <div class="price-card-header">PRO ВЕРСИЯ</div>
+                <div class="price-card-amount" id="price-pro-amount">1 000 <span>сом</span></div>
+                <ul class="price-card-features">
+                  <li>Все 12 готовых игр (стикмены, реакция и настольные)</li>
+                  <li>Игры на реакцию: 6-8 игроков</li>
+                  <li>ИИ-генератор вопросов</li>
+                </ul>
+              </div>
+              <div class="btn-select-plan">Выбрать PRO</div>
+            </div>
+          </div>
+
+          <!-- DYNAMIC LOCAL MOBILE BANKS SECTION -->
+          <div id="detected-banks-container" style="display: none;">
+            <div style="font-size: 10px; font-weight:700; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase;">
+              📱 Обнаруженные мобильные банки
+            </div>
+            <div class="bank-options-grid" id="detected-banks-grid">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+          
+          <div id="no-banks-detected-alert" style="background:rgba(255,255,255,0.02); border: 1px dashed var(--border-light); padding:8px; border-radius:10px; text-align:center; font-size:10px; color:var(--text-muted); margin-bottom:10px;">
+            Установленные мобильные банки не обнаружены.
+          </div>
+
+          <!-- VISA CARD FORM -->
+          <div id="visa-card-title" style="font-size: 10px; font-weight:700; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase;">
+            💳 Оплата картой Visa / Mastercard
+          </div>
+          
+          <div class="card-payment-form" id="visa-card-form" onclick="app.selectPaymentMethod('card')">
+            <div class="form-group" style="margin-bottom:0; gap:3px;">
+              <label style="font-size:9px;">Номер карты Visa</label>
+              <div class="card-input-wrapper">
+                <input type="text" id="pay-card-number" placeholder="4000 1234 5678 9010" maxlength="19" oninput="app.formatCardNumber(this)">
+                <span class="card-brand-icon" id="card-brand-icon">Visa</span>
+              </div>
+            </div>
+            <div class="card-row-split">
+              <div class="form-group" style="margin-bottom:0; gap:3px;">
+                <label style="font-size:9px;">Срок действия</label>
+                <input type="text" id="pay-card-expiry" placeholder="MM/YY" maxlength="5" oninput="app.formatCardExpiry(this)">
+              </div>
+              <div class="form-group" style="margin-bottom:0; gap:3px;">
+                <label style="font-size:9px;">CVC</label>
+                <input type="password" id="pay-card-cvc" placeholder="***" maxlength="3">
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-pro" id="btn-pay-execute" style="margin-top: 12px;" onclick="app.processPayment()">
+            💳 Оплатить подписку (1 200 сом)
+          </button>
+        </div>
+
+        <!-- VIEW 3: ADMIN CABINET (DASHBOARD) -->
+        <div id="admin-dashboard-panel" class="view-panel">
+          
+          <!-- Top Control Row: Beautiful Full-Width Settings Button -->
+          <div style="margin-bottom: 15px; width: 100%;">
+            <button onclick="app.openVenueGameLimitsModal()" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(245, 158, 11, 0.18)); border: 1px solid var(--border-glow); border-radius: 14px; height: 44px; width: 100%; font-size: 13px; font-weight: 800; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); outline: none; box-sizing: border-box; transition: all 0.2s;">
+              ⚙️ Настройки локации и лимиты игр 🚀
+            </button>
+          </div>
+
+          <!-- Welcome Header Configuration -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-bottom: 15px;">
+            <label style="grid-row: 1; grid-column: 1; margin: 0;">Приветствие (до 50 слов)</label>
+            <label style="grid-row: 1; grid-column: 2; margin: 0;">Приз для победителя игры</label>
+            
+            <input type="text" id="admin-venue-welcome" style="grid-row: 2; grid-column: 1; margin: 0;" placeholder="Приветствие..." oninput="app.saveWelcomeMsg(this.value)" onchange="app.saveWelcomeMsg(this.value)" onblur="app.saveWelcomeMsg(this.value)">
+            <input type="text" id="admin-venue-prize" style="grid-row: 2; grid-column: 2; margin: 0;" placeholder="Введите приз..." oninput="app.savePrizeMsg(this.value)" onchange="app.savePrizeMsg(this.value)" onblur="app.savePrizeMsg(this.value)">
+          </div>
+
+          <!-- Section: 12 Games List with Lock/Toggle Switches -->
+          <div class="section-title" style="margin-top: 20px; margin-bottom: 14px; font-size: 15px; font-weight: 700; color: #fff;">
+            <span>Опубликуйте игры для игроков</span>
+          </div>
+          
+          <div class="games-grid" id="games-container">
+            <!-- 12 game slots rendered by JS. Slot 1 (Quiz) editable, others toggleable locks -->
+          </div>
+
+          <!-- Section: Location QR-Code -->
+          <div class="section-title">QR-код локации</div>
+          <div class="qr-container" style="padding: 15px; border-radius: 20px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-light); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+            
+            <!-- Sticker Preview Box -->
+            <div style="background: #fff; padding: 12px; border-radius: 16px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; max-width: 140px;">
+              <div style="color: #000; font-family: 'Outfit', sans-serif; display: flex; flex-direction: column; align-items: center;">
+                <div style="font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; color: var(--primary);">WAITPLAY GUEST</div>
+                
+                <svg viewBox="0 0 100 100" width="80" height="80">
+                  <rect x="0" y="0" width="100" height="100" fill="white"/>
+                  <!-- Finder Patterns -->
+                  <rect x="5" y="5" width="25" height="25" fill="black"/>
+                  <rect x="9" y="9" width="17" height="17" fill="white"/>
+                  <rect x="13" y="13" width="9" height="9" fill="black"/>
+                  <rect x="70" y="5" width="25" height="25" fill="black"/>
+                  <rect x="74" y="9" width="17" height="17" fill="white"/>
+                  <rect x="78" y="13" width="9" height="9" fill="black"/>
+                  <rect x="5" y="70" width="25" height="25" fill="black"/>
+                  <rect x="9" y="74" width="17" height="17" fill="white"/>
+                  <rect x="13" y="78" width="9" height="9" fill="black"/>
+                  <rect x="42" y="42" width="16" height="16" fill="#8b5cf6" rx="3"/>
+                  <text x="50" y="54" font-family="'Outfit'" font-size="10" font-weight="900" fill="white" text-anchor="middle">W</text>
+                  
+                  <rect x="40" y="10" width="4" height="8" fill="black"/>
+                  <rect x="50" y="5" width="8" height="4" fill="black"/>
+                  <rect x="45" y="20" width="4" height="4" fill="black"/>
+                  <rect x="60" y="40" width="8" height="4" fill="black"/>
+                  <rect x="65" y="50" width="4" height="8" fill="black"/>
+                  <rect x="40" y="60" width="4" height="4" fill="black"/>
+                  <rect x="50" y="65" width="8" height="4" fill="black"/>
+                  <rect x="10" y="45" width="8" height="4" fill="black"/>
+                  <rect x="25" y="40" width="4" height="8" fill="black"/>
+                  <rect x="80" y="45" width="4" height="4" fill="black"/>
+                  <rect x="85" y="55" width="4" height="8" fill="black"/>
+                  <rect x="45" y="80" width="8" height="4" fill="black"/>
+                  <rect x="55" y="85" width="4" height="4" fill="black"/>
+                  <rect x="60" y="75" width="4" height="8" fill="black"/>
+                </svg>
+
+                <div id="admin-qr-sticker-label" style="font-size: 8px; font-weight: 700; color: #000; margin-top: 4px; text-transform: uppercase;">ОТСКАНИРУЙТЕ QR-КОД</div>
+              </div>
+            </div>
+
+            <!-- Sharing Actions -->
+            <button class="btn btn-pro" onclick="app.shareBranchGameLink()" style="padding: 12px; font-weight: 800; margin: 0; width: 100%; font-size: 12px;">
+              🔗 Поделиться играми (Ссылка / QR)
+            </button>
+
+            <button class="btn btn-secondary" onclick="app.adminDownloadPrintPDF()" style="padding: 12px; font-weight: 800; margin: 4px 0 0 0; width: 100%; font-size: 12px;">
+              📥 Скачать наклейку QR для печати (PDF)
+            </button>
+          </div>
+        </div>
+
+        <!-- VIEW 4: EDIT QUIZ PANEL -->
+        <div id="admin-edit-quiz-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h2 class="section-title" style="margin:0;" id="quiz-editor-title">Редактор Викторины</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.finishQuizEditing()">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <!-- Quiz Limits & Question Count Config Card -->
+          <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 14px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+            <!-- Player limits (Min / Max players) -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 9px;">Мин. игроков (2-15)</label>
+                <div style="display: flex; align-items: center; gap: 6px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 10px; padding: 4px 8px; box-sizing: border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustQuizMinPlayers(-1)" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; border-radius: 6px; margin: 0;">-</button>
+                  <span id="label-quiz-min-players" style="flex: 1; text-align: center; font-size: 11px; font-weight: 700; color: #fff;">2</span>
+                  <button class="btn btn-secondary" onclick="app.adjustQuizMinPlayers(1)" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; border-radius: 6px; margin: 0;">+</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 9px;">Макс. игроков (2-15)</label>
+                <div style="display: flex; align-items: center; gap: 6px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 10px; padding: 4px 8px; box-sizing: border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustQuizMaxPlayers(-1)" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; border-radius: 6px; margin: 0;">-</button>
+                  <span id="label-quiz-max-players" style="flex: 1; text-align: center; font-size: 11px; font-weight: 700; color: #fff;">15</span>
+                  <button class="btn btn-secondary" onclick="app.adjustQuizMaxPlayers(1)" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; border-radius: 6px; margin: 0;">+</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Question Count Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background: #110e1f; border: 1px solid var(--border-light); border-radius: 10px; padding: 8px 12px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Количество вопросов: <span id="quiz-questions-count" style="color: var(--gold); font-weight: 800;">8</span></span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-secondary" onclick="app.adjustQuizQuestionsCount(-1)" style="padding: 4px 10px; width: auto; font-size: 10px; font-weight: 800; margin: 0;">➖ Убрать</button>
+                <button class="btn btn-primary" onclick="app.adjustQuizQuestionsCount(1)" style="padding: 4px 10px; width: auto; font-size: 10px; font-weight: 800; margin: 0;">➕ Добавить</button>
+              </div>
+            </div>
+          </div>
+          
+          <div id="quiz-questions-edit-list" style="display:flex; flex-direction:column; overflow-y:auto; flex: 1; padding-bottom: 20px; -webkit-overflow-scrolling: touch;">
+            <!-- Dynamic list of questions cards -->
+            <div id="quiz-questions-cards-list" style="display:flex; flex-direction:column; gap:15px; box-sizing:border-box;">
+              <!-- Rendered by JS -->
+            </div>
+
+            <!-- Bot settings and test arena for Quiz -->
+            <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:12px; margin-top:15px; box-sizing:border-box;">
+              <!-- Mini Quiz Game Test Arena inside Admin Settings -->
+              <div id="admin-quiz-test-arena" style="background:rgba(0,0,0,0.15); border:1.5px dashed rgba(255,255,255,0.08); border-radius:14px; padding:15px; text-align:center; box-sizing:border-box;">
+                <!-- Locked State Layout -->
+                <div id="admin-quiz-test-arena-locked" style="display:block;">
+                  <div style="font-size:10px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:4px;">
+                    🔒 Тест-арена заблокирована
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted); margin-bottom:12px; line-height:1.4; padding:0 5px;">
+                    Чтобы протестировать Викторину прямо здесь, пожалуйста, включите Тест-режим на главном экране панели администратора.
+                  </div>
+                </div>
+
+                <!-- Unlocked State Layout -->
+                <div id="admin-quiz-test-arena-unlocked" style="display:none;">
+                  <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:4px;">
+                    🧪 Тест викторины
+                  </div>
+                  <div id="admin-quiz-test-status" style="font-size:11px; color:#fff; margin-bottom:12px; font-weight:600;">
+                    Нажмите кнопку ниже, чтобы начать тестовую викторину.
+                  </div>
+                  
+                  <div id="admin-quiz-test-game-container" style="display:none; flex-direction:column; gap:8px; text-align:left; margin-bottom:12px; box-sizing:border-box;">
+                    <!-- Current question label -->
+                    <div id="admin-quiz-test-q-index" style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Вопрос 1 из 8</div>
+                    <!-- Question text -->
+                    <div id="admin-quiz-test-q-text" style="font-size:12px; font-weight:700; color:#fff; line-height:1.4;">Текст вопроса...</div>
+                    <!-- Options container -->
+                    <div id="admin-quiz-test-options" style="display:grid; grid-template-columns:1fr; gap:6px; margin:5px 0; box-sizing:border-box;">
+                      <!-- Option buttons rendered by JS -->
+                    </div>
+                  </div>
+                  
+                  <button class="btn btn-primary" id="btn-admin-quiz-test-start" onclick="app.startAdminQuizTest()" style="width:100%; padding:10px; font-size:11px; font-weight:800; margin:0; border-radius:10px;">
+                    🎮 Начать тест-матч
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.5: EDIT TIC-TAC-TOE PANEL -->
+        <div id="admin-edit-ttt-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Крестиков-Ноликов</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px;">
+            <!-- 1. Количество участников (Живые посетители) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Количество Участников Турнира</label>
+              <div style="display:flex; align-items:center; gap:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:6px 10px;">
+                <button class="btn btn-secondary" id="btn-ttt-size-dec" onclick="app.adjustTTTSize(-1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">-</button>
+                <span id="label-ttt-size" style="flex:1; text-align:center; font-size:12px; font-weight:700; color:#fff;">8 игроков (3 раунда)</span>
+                <button class="btn btn-secondary" id="btn-ttt-size-inc" onclick="app.adjustTTTSize(1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">+</button>
+              </div>
+            </div>
+
+            <!-- 2. Лимит времени на ход (Живые посетители) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Лимит времени на ход</label>
+              <select id="settings-ttt-turn-limit" onchange="app.saveTTTConfig('tttTurnLimit', this.value)" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="none">Без лимита (по-семейному) ☕</option>
+                <option value="5">5 секунд (блиц) ⚡</option>
+                <option value="10">10 секунд (быстро) ⏱️</option>
+                <option value="15">15 секунд (нормально)</option>
+                <option value="20">20 секунд (медленно)</option>
+              </select>
+            </div>
+
+            <!-- 3. Лимит ничьих в матче (Живые посетители) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Лимит ничьих в матче (от 3 до 50)</label>
+              <div style="display:flex; align-items:center; gap:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:6px 10px;">
+                <button class="btn btn-secondary" id="btn-ttt-draws-dec" onclick="app.adjustTTTMaxDraws(-1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">-</button>
+                <span id="label-ttt-draws" style="flex:1; text-align:center; font-size:12px; font-weight:700; color:#fff;">3 ничьих</span>
+                <button class="btn btn-secondary" id="btn-ttt-draws-inc" onclick="app.adjustTTTMaxDraws(1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.5B: EDIT CHECKERS PANEL -->
+        <div id="admin-edit-checkers-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Шашек 🏁</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px;">
+            <!-- 1. Лимит времени на ход -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Лимит времени на ход</label>
+              <select id="settings-checkers-turn-limit" onchange="app.saveCheckersConfig('checkersTurnLimit', this.value)" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="none">Без лимита (неторопливо) ☕</option>
+                <option value="10">10 секунд (быстро) ⏱️</option>
+                <option value="15">15 секунд (нормально)</option>
+                <option value="20">20 секунд (медленно)</option>
+                <option value="30">30 секунд (вдумчиво)</option>
+              </select>
+            </div>
+
+            <!-- 2. Лимиты участников по парам -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-light); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; font-weight:800; color:var(--gold);">ЛИМИТЫ УЧАСТНИКОВ (ПО ПАРАМ)</div>
+              
+              <!-- Минимально игроков -->
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Минимум игроков:</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustCheckersPlayersLimit('min', -2)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-checkers-min-players" style="font-size:11px; font-weight:800; color:#fff; min-width:80px; text-align:center;">2 (1 пара)</span>
+                  <button class="btn btn-secondary" onclick="app.adjustCheckersPlayersLimit('min', 2)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+
+              <!-- Максимально игроков -->
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Максимум игроков:</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustCheckersPlayersLimit('max', -2)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-checkers-max-players" style="font-size:11px; font-weight:800; color:#fff; min-width:80px; text-align:center;">2 (1 пара)</span>
+                  <button class="btn btn-secondary" onclick="app.adjustCheckersPlayersLimit('max', 2)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+            
+            <div style="font-size:10px; color:var(--text-muted); line-height:1.4; padding: 5px 0;">
+              💡 <b>Ограничение игроков:</b> Игра «Шашки» запускается строго по парам (2, 4, 6 или 8 человек). Соперники играют друг против друга.
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.5D: EDIT CHESS PANEL -->
+        <div id="admin-edit-chess-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 class="section-title" style="margin:0;">Настройки Шахмат ♟️</h2>
+            <button class="btn btn-pro" style="padding:6px 14px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:16px;">
+            <!-- 1. Лимит времени на партию (Шахматные часы) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label style="font-size:11px; font-weight:800; color:var(--gold); margin-bottom:6px; display:block;">⏱️ ШАХМАТНЫЕ ЧАСЫ (ВРЕМЯ НА ПАРТИЮ)</label>
+              <select id="settings-chess-time-limit" onchange="app.saveChessConfig('chessTimeLimit', parseInt(this.value))" style="width:100%; padding:10px 12px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; font-weight:600; outline:none;">
+                <option value="5">5 минут (Блиц ⚡)</option>
+                <option value="10" selected>10 минут (Рапид ⏱️ - стандарт)</option>
+                <option value="15">15 минут (Классика ☕)</option>
+                <option value="20">20 минут (Максимум ⏳)</option>
+              </select>
+              <div style="font-size:9px; color:var(--text-muted); margin-top:5px; line-height:1.3;">
+                💡 Если у игрока истекает время (00:00), ему засчитывается автоматическое поражение по таймеру.
+              </div>
+            </div>
+
+            <!-- 2. Турнирный режим и лимиты участников -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-light); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; font-weight:800; color:var(--gold);">🏆 ТУРНИРНЫЙ РЕЖИМ (СЕТКА НА ВЫБЫВАНИЕ)</div>
+              
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff; font-weight:600;">Участников в турнире:</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustChessTournamentSize(-2)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:14px; font-weight:800; margin:0;">-</button>
+                  <span id="label-chess-tournament-size" style="font-size:11px; font-weight:800; color:#fff; min-width:90px; text-align:center;">8 чел. (1/4)</span>
+                  <button class="btn btn-secondary" onclick="app.adjustChessTournamentSize(2)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:14px; font-weight:800; margin:0;">+</button>
+                </div>
+              </div>
+              <div style="font-size:9px; color:var(--text-muted); line-height:1.3;">
+                💡 Поддерживается турнирная сетка до 8 игроков (1/4 Финала ➔ 1/2 Финала ➔ Финал).
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- VIEW 4.5D: EDIT SLICING GAME PANEL -->
+        <div id="admin-edit-slicing-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Нарезки 🔪</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px;">
+            <!-- 1. Предмет для нарезки -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Что нарезаем?</label>
+              <select id="settings-slicing-item" onchange="app.saveSlicingConfig('slicingItem', this.value)" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="bread">🍞 Хлеб (батон)</option>
+                <option value="cucumber">🥒 Огурец</option>
+                <option value="cake">🎂 Торт</option>
+                <option value="pizza">🍕 Пицца</option>
+              </select>
+            </div>
+
+            <!-- 2. Время игры -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Время на нарезку</label>
+              <select id="settings-slicing-duration" onchange="app.saveSlicingConfig('slicingDuration', parseInt(this.value))" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="15">15 секунд (экспресс) ⚡</option>
+                <option value="30" selected>30 секунд (оптимально) ⏱️</option>
+                <option value="60">60 секунд (марафон) 🏃</option>
+              </select>
+            </div>
+
+            <!-- 3. Лимиты участников -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-light); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; font-weight:800; color:var(--gold);">ЛИМИТЫ УЧАСТНИКОВ</div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Минимум игроков (2-8):</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustSlicingPlayersLimit('min', -1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-slicing-min-players" style="font-size:11px; font-weight:800; color:#fff; min-width:60px; text-align:center;">2 чел.</span>
+                  <button class="btn btn-secondary" onclick="app.adjustSlicingPlayersLimit('min', 1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Максимум игроков (2-8):</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustSlicingPlayersLimit('max', -1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-slicing-max-players" style="font-size:11px; font-weight:800; color:#fff; min-width:60px; text-align:center;">8 чел.</span>
+                  <button class="btn btn-secondary" onclick="app.adjustSlicingPlayersLimit('max', 1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.5E: EDIT CAKE TO SKY PANEL -->
+        <div id="admin-edit-cake-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Торт до небес 🎂</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px;">
+            <!-- 1. Время раунда -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Время укладки торта</label>
+              <select id="settings-cake-duration" onchange="app.saveCakeConfig('cakeDuration', parseInt(this.value))" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="20">20 секунд (экспресс) ⚡</option>
+                <option value="40" selected>40 секунд (стандарт) ⏱️</option>
+                <option value="115">115 секунд (~2 минуты) ⏳</option>
+                <option value="140">140 секунд (марафон) 🏆</option>
+                <option value="0">Без ограничений по времени ♾️</option>
+              </select>
+            </div>
+
+            <!-- 2. Лимиты участников -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-light); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; font-weight:800; color:var(--gold);">ЛИМИТЫ УЧАСТНИКОВ</div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Минимум игроков (2-8):</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustCakePlayersLimit('min', -1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-cake-min-players" style="font-size:11px; font-weight:800; color:#fff; min-width:60px; text-align:center;">2 чел.</span>
+                  <button class="btn btn-secondary" onclick="app.adjustCakePlayersLimit('min', 1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Максимум игроков (2-8):</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustCakePlayersLimit('max', -1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">-</button>
+                  <span id="label-cake-max-players" style="font-size:11px; font-weight:800; color:#fff; min-width:60px; text-align:center;">8 чел.</span>
+                  <button class="btn btn-secondary" onclick="app.adjustCakePlayersLimit('max', 1)" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Скорость раскачивания клещей (1-10) -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-light); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:8px;">
+              <div style="font-size:11px; font-weight:800; color:var(--gold);">СКОРОСТЬ РАСКАЧИВАНИЯ (1-10)</div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#fff;">Скорость клещей:</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn btn-secondary" onclick="app.adjustCakeSpeedLimit(-1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:14px; font-weight:800; margin:0;">-</button>
+                  <span id="label-cake-speed" style="font-size:11px; font-weight:800; color:var(--gold); min-width:80px; text-align:center;">5 (Средне)</span>
+                  <button class="btn btn-secondary" onclick="app.adjustCakeSpeedLimit(1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:14px; font-weight:800; margin:0;">+</button>
+                </div>
+              </div>
+              <div style="font-size:9px; color:var(--text-muted); text-align:center;">
+                1 — медленно как улитка 🐌, 5 — стандарт, 10 — молниеносно ⚡
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.6: EDIT FIND DIFFERENCES PANEL -->
+        <div id="admin-edit-differences-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Найди Отличия</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px; box-sizing:border-box;">
+            <!-- 0. Лимиты игроков (Живые посетители) -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:0;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Мин. игроков (2-10)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustDiffMinPlayers(-1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-diff-min-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">2</span>
+                  <button class="btn btn-secondary" onclick="app.adjustDiffMinPlayers(1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Макс. игроков (2-10)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustDiffMaxPlayers(-1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-diff-max-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">10</span>
+                  <button class="btn btn-secondary" onclick="app.adjustDiffMaxPlayers(1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 1. Количество раундов (Живые посетители) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Количество раундов (отличий)</label>
+              <div style="display:flex; align-items:center; gap:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:6px 10px;">
+                <button class="btn btn-secondary" onclick="app.adjustDiffRounds(-1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">-</button>
+                <span id="label-diff-rounds" style="flex:1; text-align:center; font-size:12px; font-weight:700; color:#fff;">6 раундов</span>
+                <button class="btn btn-secondary" onclick="app.adjustDiffRounds(1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">+</button>
+              </div>
+            </div>
+
+            <!-- 2. Сложность (Размер сетки) -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Сложность (Размер сетки)</label>
+              <select id="settings-diff-grid-size" onchange="app.saveDifferencesConfig('diffGridSize', this.value)" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="easy">Легко (сетка 4х4)</option>
+                <option value="normal">Средне (сетка 6х6)</option>
+                <option value="hard">Сложно (сетка 8х8)</option>
+              </select>
+            </div>
+
+            <!-- 3. Лимит времени на раунд -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Лимит времени на раунд</label>
+              <select id="settings-diff-time-limit" onchange="app.saveDifferencesConfig('diffTimeLimit', parseInt(this.value))" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
+                <option value="10">10 секунд (быстро) ⏱️</option>
+                <option value="15">15 секунд (нормально)</option>
+                <option value="20">20 секунд (медленно) ☕</option>
+              </select>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- VIEW 4-MEMORY: MEMORY MATCH CONFIG -->
+        <div id="admin-edit-memory-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Мемори 🧠</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.saveMemoryConfig()">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:10px; box-sizing:border-box;">
+            <!-- 1. Difficulty Level -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Сложность (размер поля)</label>
+              <select id="settings-memory-difficulty" onchange="app.saveMemoryConfigField('memoryDifficulty', this.value)" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                <option value="easy">Легко (сетка 3x4, 12 карт / 6 пар)</option>
+                <option value="normal">Средне (сетка 4x4, 16 карт / 8 пар)</option>
+                <option value="hard">Сложно (сетка 4x5, 20 карт / 10 пар)</option>
+              </select>
+            </div>
+
+            <!-- 2. Time limit -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Время на раунд</label>
+              <select id="settings-memory-time-limit" onchange="app.saveMemoryConfigField('memoryTimeLimit', parseInt(this.value))" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                <option value="30">30 секунд</option>
+                <option value="45">45 секунд</option>
+                <option value="60">60 секунд (по умолчанию)</option>
+                <option value="90">90 секунд</option>
+                <option value="120">120 секунд</option>
+              </select>
+            </div>
+
+            <!-- 3. Theme selection -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Тематика карт (эмодзи)</label>
+              <select id="settings-memory-theme" onchange="app.saveMemoryConfigField('memoryTheme', this.value)" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                <option value="restaurant">Ресторан 🍕 (пицца, бургеры, десерты)</option>
+                <option value="animals">Животные 🐼 (панды, лисы, медведи)</option>
+                <option value="mixed">Смешанная 🔮 (разные эмодзи)</option>
+              </select>
+            </div>
+
+            <!-- 4. Player limits (2-5 and 2-8) -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:0;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Мин. игроков (2-5)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustMemoryPlayersLimit('min', -1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-memory-min-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">2</span>
+                  <button class="btn btn-secondary" onclick="app.adjustMemoryPlayersLimit('min', 1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Макс. игроков (2-8)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustMemoryPlayersLimit('max', -1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-memory-max-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">4</span>
+                  <button class="btn btn-secondary" onclick="app.adjustMemoryPlayersLimit('max', 1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.8: EDIT CROSSWORD PANEL -->
+        <div id="admin-edit-crossword-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Кроссворда</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.saveCrosswordCustomConfig()">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:10px; box-sizing:border-box;">
+            <!-- 1. Difficulty Level & Shape Shuffle Selection -->
+            <div style="display: flex; gap: 8px; align-items: flex-end; width: 100%;">
+              <div class="form-group" style="margin-bottom:0; flex: 1;">
+                <label>Сложность кроссворда</label>
+                <select id="settings-crossword-difficulty" onchange="app.saveCrosswordConfig('crosswordDifficulty', this.value)" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                  <option value="easy">Легко (сетка 8х8, ~5 слов)</option>
+                  <option value="normal">Средне (сетка 10х10, ~7 слов)</option>
+                  <option value="hard">Сложно (сетка 12х12, ~9 слов)</option>
+                </select>
+              </div>
+              <button class="btn btn-secondary" onclick="app.shuffleCrosswordLayout()" style="width:auto; padding: 9px 12px; margin: 0; font-size: 10px; font-weight: 700; border-radius: 10px; flex-shrink: 0; height: 35px; display: flex; align-items: center; gap: 4px; border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff;">
+                🔀 Изменить форму
+              </button>
+            </div>
+
+            <!-- 2. Time Limit Selection -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Ограничение по времени</label>
+              <select id="settings-crossword-time-limit" onchange="app.saveCrosswordConfig('crosswordTimeLimit', parseInt(this.value))" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                <option value="3">3 минуты ⏱️</option>
+                <option value="5">5 минут (нормально)</option>
+                <option value="10">10 минут</option>
+                <option value="15">15 минут</option>
+                <option value="20">20 минут ☕</option>
+              </select>
+            </div>
+
+            <!-- 3. Words and Clues Editor (B2B Constructor) -->
+            <div style="border: 1px solid var(--border-light); border-radius: 12px; padding: 10px; background: rgba(0,0,0,0.15);">
+              <div style="font-size: 9px; font-weight: 800; color: var(--gold); text-transform: uppercase; margin-bottom: 6px; text-align: center;">
+                ✏️ Редактор слов и подсказок
+              </div>
+              <div id="admin-crossword-words-editor" style="display: flex; flex-direction: column; gap: 8px; max-height: 140px; overflow-y: auto; padding-right: 4px;">
+                <!-- Word inputs will be rendered dynamically here -->
+              </div>
+              <div style="font-size: 8px; color: var(--text-muted); text-align: center; margin-top: 6px; line-height: 1.3;">
+                Буквы в точках пересечения должны совпадать при публикации!
+              </div>
+            </div>
+
+            <!-- 4. Interactive Crossword Grid Preview -->
+            <div style="border: 1px solid var(--border-light); border-radius: 12px; padding: 10px; background: rgba(0,0,0,0.15);">
+              <div style="font-size: 9px; font-weight: 800; color: var(--gold); text-transform: uppercase; margin-bottom: 4px; text-align: center;">
+                🗺️ Схема расположения ячеек
+              </div>
+              <div id="admin-crossword-preview-container" style="display: flex; justify-content: center; align-items: center; margin: 5px 0; overflow: auto; max-width: 100%;">
+                <!-- Dynamic Grid will be rendered here by JS -->
+              </div>
+              <div style="font-size: 8px; color: var(--text-muted); text-align: center; line-height: 1.35;">
+                Светлые клетки — буквы слов, темные — пустые пространства.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 4.9: EDIT GUESSWORD PANEL -->
+        <div id="admin-edit-guessword-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Настройки Поля Чудес</h2>
+            <button class="btn btn-pro" style="padding:6px 12px; width:auto; border-radius:8px;" onclick="app.saveGuessWordConfig()">
+              ✔️ Готово
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:10px; box-sizing:border-box;">
+            <!-- 1. Difficulty Level -->
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Сложность игры</label>
+              <select id="settings-guessword-difficulty" onchange="app.saveGuessWordConfigField('guessWordDifficulty', this.value)" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none;">
+                <option value="easy">Легко (короткие слова, простые подсказки)</option>
+                <option value="normal">Средне (обычные слова, кулинарные термины)</option>
+                <option value="hard">Сложно (длинные слова, специальные термины)</option>
+              </select>
+            </div>
+
+            <!-- 2. Player limits (2-5) -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:0;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Мин. игроков (2-5)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustGuessWordPlayersLimit('min', -1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-guessword-min-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">2</span>
+                  <button class="btn btn-secondary" onclick="app.adjustGuessWordPlayersLimit('min', 1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Макс. игроков (2-5)</label>
+                <div style="display:flex; align-items:center; gap:6px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:4px 8px; box-sizing:border-box;">
+                  <button class="btn btn-secondary" onclick="app.adjustGuessWordPlayersLimit('max', -1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">-</button>
+                  <span id="label-guessword-max-players" style="flex:1; text-align:center; font-size:11px; font-weight:700; color:#fff;">5</span>
+                  <button class="btn btn-secondary" onclick="app.adjustGuessWordPlayersLimit('max', 1)" style="width:28px; height:28px; padding:0; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; border-radius:6px; margin:0;">+</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Custom Word and Clue Constructor -->
+            <div style="border: 1px solid var(--border-light); border-radius: 12px; padding: 10px; background: rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 8px;">
+              <div style="font-size: 9px; font-weight: 800; color: var(--gold); text-transform: uppercase; margin-bottom: 2px; text-align: center;">
+                ✍️ Собственное секретное слово
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Слово (русские буквы)</label>
+                <input type="text" id="settings-guessword-custom-word" placeholder="Например: ОФИЦИАНТ" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none; text-transform:uppercase;">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Подсказка / Вопрос</label>
+                <textarea id="settings-guessword-custom-clue" placeholder="Например: Работник заведения, который обслуживает столы" rows="2" style="width:100%; padding:9px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:11px; outline:none; resize:none; font-family:inherit;"></textarea>
+              </div>
+              <div style="font-size: 8px; color: var(--text-muted); text-align: center; line-height: 1.35; margin-top: 2px;">
+                Если поля оставить пустыми, слово выберется случайно из встроенных пресетов для выбранной сложности.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 5: DEVICE MIGRATION / SETTINGS WORKSPACE -->
+        <div id="admin-migration-panel" class="view-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 class="section-title" style="margin:0;">Перенос управления и данные</h2>
+            <button class="btn-secondary" style="padding:6px 12px; border-radius:8px;" onclick="app.setAdminPanelActiveView('dashboard')">
+              Назад
+            </button>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:12px; margin-bottom:12px;">
+            <h4 style="font-size:12px; font-weight:700; color:var(--primary); margin-bottom:5px;">Привязанные контакты</h4>
+            <div style="font-size:11px; display:flex; flex-direction:column; gap:4px;">
+              <span>Email: <strong id="mig-info-email">--</strong></span>
+              <span>Телефон: <strong id="mig-info-phone">--</strong></span>
+            </div>
+          </div>
+
+          <div class="form-group" id="mig-transfer-request-box">
+            <h4 style="font-size:12px; font-weight:700; color:var(--gold); margin-bottom:5px;">Передача Google аккаунта</h4>
+            <p style="font-size:10px; color:var(--text-muted); line-height:1.4; margin-bottom:8px;">
+              Для переноса управления на новое устройство нажмите кнопку ниже. Мы вышлем 4-значный код на ваш Email.
+            </p>
+            <button class="btn btn-primary" onclick="app.migInitiateTransfer()">Инициировать перенос аккаунта 📧</button>
+          </div>
+
+          <div id="mig-transfer-code-box" style="display:none; text-align:center;">
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Введите 4-значный код с вашего Email:</p>
+            <div class="verification-code-container">
+              <input type="text" maxlength="4" class="code-char-input" id="mig-email-code-input" style="width:120px;">
+            </div>
+            <div class="timer-display-box" id="mig-timer-display">03:00</div>
+            <button class="btn btn-primary" onclick="app.migVerifyAndCompleteTransfer()">Подтвердить и перенести аккаунт</button>
+            <div style="font-size: 9px; color: var(--text-muted); margin-top: 8px; text-align: center;">
+              Для быстрого теста введите код разработчика: <strong style="color: var(--gold);">1234</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 9: BANNED PANEL -->
+        <div id="admin-banned-panel" class="view-panel" style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 50px; margin-bottom: 20px;">🚫</div>
+          <h2 style="color: var(--error); font-size: 20px; font-weight: 700; margin-bottom: 15px; text-transform: uppercase;">Доступ заблокирован</h2>
+          <p style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 25px;">
+            Ваш аккаунт заблокирован Разработчиками WaitPlay за нарушение правил использования платформы.
+          </p>
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 12px; padding: 15px; font-size: 11px; text-align: left; margin-bottom: 25px;">
+            <div style="font-weight: 700; color: #fff; margin-bottom: 5px;">Информация о блокировке:</div>
+            <div style="color: var(--text-muted);">Email: <span id="banned-info-email" style="color: #fff;"></span></div>
+            <div style="color: var(--text-muted);">Телефон: <span id="banned-info-phone" style="color: #fff;"></span></div>
+            <div style="color: var(--text-muted); margin-top: 5px;">Причина: <span id="banned-info-reason" style="color: var(--gold); font-style: italic;">Нарушение правил ИИ-генератора</span></div>
+          </div>
+          <p style="font-size: 10px; color: var(--text-muted);">
+            Если вы считаете это ошибкой, свяжитесь с Разработчиками по почте: support@waitplay.com
+          </p>
+        </div>
+
+        <!-- VIEW 10: MAINTENANCE MODE PANEL -->
+        <div id="admin-maintenance-panel" class="view-panel" style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 50px; margin-bottom: 20px;">🛠️</div>
+          <h2 style="color: var(--gold); font-size: 20px; font-weight: 700; margin-bottom: 15px; text-transform: uppercase;">Технические работы</h2>
+          <p style="font-size: 12px; color: var(--text-main); line-height: 1.6; margin-bottom: 25px;">
+            Платформа WaitPlay временно закрыта для проведения технических работ. Мы обновляем наши базы данных, игры и искусственный интеллект для улучшения вашего опыта.
+          </p>
+          <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 12px; padding: 15px; font-size: 11px; text-align: center;">
+            <span style="color: var(--gold); font-weight: 700;">Платформа скоро возобновит работу! ⏳</span>
+          </div>
+        </div>
+
+        <!-- Toast alerts -->
+        <div id="admin-toast" class="toast"></div>
+
+      </div>
+    </div>
+
+    <!-- DEVICE 2: VISITOR PHONE SIMULATOR -->
+    <div class="phone-frame" id="visitor-frame">
+
+      <div id="lobby-queue-overlay" style="display: none; position: absolute; inset: 0; background: #0c0a1a; padding: max(45px, env(safe-area-inset-top)) 20px max(40px, env(safe-area-inset-bottom)) 20px; text-align: center; box-sizing: border-box; flex-direction: column; justify-content: center; align-items: center; gap: 20px; z-index: 9999; overflow-y: auto; border-radius: 36px;">
+        <div style="width: 100%; display: flex; flex-direction: column; align-items: center;">
+          <div style="font-weight: 800; font-size: 14px; margin-bottom: 4px; color: var(--gold); text-transform: uppercase; letter-spacing: 0.5px;">Комната ожидания игры</div>
+          <div class="template-players" style="justify-content: center; font-size: 11px; font-weight: 700;" id="visitor-lobby-players-count">👥 1 / 15</div>
+        </div>
+        
+        <!-- Radar Pulsing Circle Layout -->
+        <div class="radar-container" id="visitor-radar-box" style="margin: 5px 0;">
+          <div class="radar-circle"></div>
+          <div class="radar-circle"></div>
+          <div class="radar-circle"></div>
+          <div class="radar-core">📡</div>
+        </div>
+
+        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid var(--border-glow); padding: 16px; border-radius: 16px; width: 100%; max-width: 320px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
+          <div style="font-size: 11px; color: var(--text-muted);" id="lobby-countdown-label">Ожидание игроков...</div>
+          <div class="game-timer" id="lobby-countdown-timer" style="font-size: 28px; font-weight: 800; margin: 4px 0; color: #fff;">--</div>
+        </div>
+        <button class="btn btn-danger" onclick="app.visitorLeaveQueue()" style="padding: 12px 16px; font-size: 11px; margin: 0; width: 100%; max-width: 320px; font-weight: 800; border-radius: 12px; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.25);">Покинуть комнату</button>
+      </div>
+
+      <div class="screen visitor-screen">
+        <!-- HEADER -->
+        <header id="visitor-header" style="display: none;">
+          <div class="logo-container">
+            <div class="logo-icon">W</div>
+            <div class="logo-text" id="visitor-venue-title">WaitPlay</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button id="btn-visitor-disconnect" class="debug-btn-mini" style="display:none; padding:2px 6px; font-size:9px; border-color:rgba(239, 68, 68, 0.4); color:var(--error); margin:0;" onclick="app.visitorDisconnect()">❌ Выйти</button>
+          </div>
+        </header>
+
+        <!-- VIEW 10: VISITOR MAINTENANCE PANEL -->
+        <div id="visitor-maintenance-panel" class="view-panel" style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 50px; margin-bottom: 20px;">🛠️</div>
+          <h3 style="color: var(--gold); font-size: 16px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase;">Технические работы</h3>
+          <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 25px;">
+            Платформа временно закрыта для проведения технических работ. Подключение к игровым столам будет возобновлено в ближайшее время.
+          </p>
+          <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 12px; padding: 12px; font-size: 11px; text-align: center;">
+            <span style="color: var(--gold); font-weight: 700;">Приносим извинения за неудобства! ⏳</span>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 1: QR CODE REQUIREMENT -->
+        <div id="visitor-locked-panel" class="view-panel active">
+          <div class="visitor-block-screen">
+            <div class="visitor-block-icon">📲</div>
+            <h3 style="font-size: 16px; font-weight: 700;">Отсканируйте QR-код</h3>
+            <p style="font-size: 12px; color: var(--text-muted); max-width: 250px;">
+              Пожалуйста, отсканируйте QR-код на локации, чтобы подключиться к игре.
+            </p>
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--border-light); padding: 12px; border-radius: 12px; width: 100%; font-size: 11px; color: var(--text-muted);">
+              Нажмите кнопку <strong>«Протестировать как гость»</strong> на панели администратора слева, чтобы симулировать сканирование столика №4.
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 2: VISITOR DISCLAIMER POPUP -->
+        <div id="visitor-disclaimer-panel" class="view-panel" style="justify-content: center; height: 100%;">
+          <div class="visitor-block-screen">
+            <div class="visitor-block-icon" style="font-size: 30px; color: var(--gold);">⚖️</div>
+            <h3 style="font-size: 15px; font-weight: 700; color: var(--gold); margin-bottom:5px;">Предупреждение игрока</h3>
+            
+            <div class="disclaimer-card" style="font-size:11px; line-height:1.45; margin-bottom:15px;">
+              Платформа <strong>"WaitPlay"</strong> предоставляет исключительно техническую площадку для проведения развлекательных игр.
+              <br><br>
+              <strong>ВНИМАНИЕ:</strong> Организатор (администрация) несет полную и единоличную ответственность за организацию призов, подарков, наград, а также за содержание игрового контента. 
+              <br><br>
+              Все споры и претензии относительно результатов игр и выдачи бонусов направляются непосредственно организаторам.
+            </div>
+
+            <button class="btn btn-primary" onclick="app.visitorAcceptDisclaimer()">
+              ОК, мне всё понятно 👍
+            </button>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 3: GPS VERIFYING -->
+        <div id="visitor-gps-check-panel" class="view-panel">
+          <div class="visitor-block-screen">
+            <div class="visitor-block-icon" style="animation: lockFloat 2s infinite;">📍</div>
+            <h3 style="font-size: 15px; font-weight: 700;">Проверка геолокации...</h3>
+            <p style="font-size: 11px; color: var(--text-muted); max-width: 260px;">
+              Мы определяем ваши GPS-координаты для проверки нахождения на локации.
+            </p>
+            <div style="width: 100%; background: rgba(255,255,255,0.05); height: 6px; border-radius: 3px; overflow: hidden; position: relative;">
+              <div style="position: absolute; left: 0; top: 0; height: 100%; width: 50%; background: var(--primary); border-radius: 3px; animation: loadingBar 1.5s infinite ease-in-out;"></div>
+            </div>
+            
+            <div id="visitor-gps-error" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 12px; font-size: 11px; color: #fca5a5; text-align: left; margin-top: 10px;">
+              <strong>Доступ заблокирован!</strong> 
+              <span id="visitor-gps-error-txt">Вы находитесь вне зоны проведения игры. Игры доступны только на локации.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 3B: CAPACITY FULL WAITING PANEL (Max 30 players limit) -->
+        <div id="visitor-capacity-full-panel" class="view-panel">
+          <div class="visitor-block-screen">
+            <div class="visitor-block-icon" style="font-size: 40px; margin-bottom: 10px;">👥</div>
+            <h3 style="font-size: 16px; font-weight: 700; color: var(--gold); margin-bottom: 6px;">⏳ Все места сейчас заняты</h3>
+            <p style="font-size: 11px; color: var(--text-muted); max-width: 260px; line-height: 1.45; margin-bottom: 16px;">
+              На этой локации сейчас играют 30 из 30 участников. Пожалуйста, подождите 1–2 минуты, пока освободится место!
+            </p>
+            
+            <button class="btn btn-primary" style="width: 100%; padding: 12px; font-weight: 700; font-size: 12px;" onclick="app.checkVisitorCapacitySlot()">
+              🔄 Проверить свободное место
+            </button>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 4: GAME SELECTION / LOBBY -->
+        <div id="visitor-lobby-panel" class="view-panel" style="position: relative;">
+          
+          <!-- Scanned Info & Limits Split Card -->
+          <div style="display: flex; gap: 8px; margin-bottom: 12px; width: 100%;">
+            <!-- Left: Scanned Venue Name -->
+            <div style="flex: 1.2; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 12px; padding: 8px 10px; text-align: left; display: flex; flex-direction: column; justify-content: center; min-height: 48px;">
+              <div style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px;">Локация</div>
+              <div id="visitor-venue-name-display" style="font-size: 12px; font-weight: 800; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
+            </div>
+            <!-- Right: Limits Status -->
+            <div style="flex: 1; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 12px; padding: 8px 10px; text-align: left; display: flex; flex-direction: column; justify-content: center; min-height: 48px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <span style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px;">Лимит игр</span>
+                <span id="visitor-limit-badge-compact" style="font-size: 11px; font-weight: 800; color: var(--success);">0 / 2</span>
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted); line-height: 1.1;">2 игры на 3 часа</div>
+            </div>
+          </div>
+
+          <!-- Expandable Announcement / Welcome Card -->
+          <div id="visitor-lobby-welcome-box" style="background: rgba(139, 92, 246, 0.04); border: 1px solid var(--border-glow); padding: 10px 12px; border-radius: 16px; margin-bottom: 12px; text-align: left; display: none; flex-direction: column; position: relative; transition: all 0.3s ease;">
+            <div style="font-size: 10px; font-weight: 800; color: var(--gold); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">ПРИВЕТСТВИЕ:</div>
+            
+            <!-- Text wrapper -->
+            <div id="visitor-lobby-welcome-text" style="font-size: 12px; color: #fff; line-height: 1.45; font-style: italic; max-height: 38px; overflow: hidden; transition: max-height 0.3s ease; text-overflow: ellipsis;">
+              <!-- Welcome Msg -->
+            </div>
+            
+            <!-- Expand Button Arrow -->
+            <div id="visitor-lobby-welcome-toggle" style="display: none; align-items: center; justify-content: center; margin-top: 6px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.05); font-size: 8px; color: var(--primary); cursor: pointer; font-weight: 700; gap: 3px;" onclick="app.toggleWelcomeTextCollapse()">
+              <span>Читать полностью</span> <span id="visitor-lobby-welcome-arrow">▼</span>
+            </div>
+          </div>
+
+          <!-- All Blocked/Under Development Text Container -->
+          <div id="visitor-no-games-alert" style="display: none; background: rgba(245, 158, 11, 0.08); border: 1px dashed rgba(245, 158, 11, 0.3); padding: 25px; border-radius: 16px; text-align: center; margin-top: 15px;">
+            <span style="font-size: 26px;">⏳</span>
+            <h4 style="font-weight: 700; font-size:13px; margin-top:8px; color: var(--gold);">Игры скоро будут готовы</h4>
+            <p style="font-size:10px; color: var(--text-muted); margin-top: 4px;">
+              Администратор временно отключил все игры для обновления вопросов. Зайдите позже!
+            </p>
+          </div>
+
+          <div id="visitor-lobby-games-grid-title" class="section-title" style="margin-top: 20px; margin-bottom: 14px; font-size: 15px; font-weight: 700; color: #fff;">Выберите игру</div>
+          <div class="games-grid" id="visitor-lobby-games-list">
+            <!-- 10 game slots rendered by JS. Blocked ones show locks. -->
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 5: ACTIVE PLAYING SCREEN -->
+        <div id="visitor-game-panel" class="view-panel">
+          <div class="game-room-container">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <button class="debug-btn-mini" style="border-color: rgba(239,68,68,0.4); color: var(--error); padding: 2px 6px; font-size: 8px; margin: 0;" onclick="app.visitorExitActiveGame()">❌ Выйти</button>
+                <span style="font-size: 10px; color: var(--text-muted);" id="visitor-game-q-index">Вопрос 1 из 8</span>
+              </div>
+              <span class="badge badge-base" style="font-family: monospace;" id="visitor-game-score">Очки: 0</span>
+            </div>
+
+            <div class="game-playing-box">
+              <div id="visitor-game-type-label" style="font-size: 10px; color: var(--gold); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">ВИКТОРИНА 🎯</div>
+              <h2 style="font-size: 13px; font-weight: 700; line-height: 1.4; margin: 8px 0; width: 100%;" id="visitor-game-question-text">Загрузка...</h2>
+              
+              <div class="options-grid" id="visitor-game-options">
+                <!-- Rendered dynamically -->
+              </div>
+            </div>
+
+            <!-- List of other simulated live players -->
+            <div id="visitor-game-players-box" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 14px; padding: 8px 10px;">
+              <div id="visitor-game-players-header" style="font-size: 9px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Участники викторины:</div>
+              <div class="player-list" id="visitor-game-players-list">
+                <!-- Rendered by JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 5.5: GAME RESULTS & PRIZE SCREEN -->
+        <div id="visitor-results-panel" class="view-panel">
+          <div class="visitor-block-screen" style="justify-content: flex-start; padding-top: 10px;">
+            <div id="visitor-results-icon" style="font-size: 38px; margin-bottom: 4px;">🏆</div>
+            <h3 style="font-size: 16px; font-weight: 800; color: var(--gold); margin-bottom: 2px;" id="visitor-results-header">Итоги игры</h3>
+            <p style="font-size: 10px; color: var(--text-muted); margin-bottom: 10px; text-align: center; display: none;">Поздравляем с прохождением викторины!</p>
+            
+            <!-- 3D CSS Podium container -->
+            <div class="podium-container" id="visitor-podium-box">
+              <!-- Rendered dynamically by JS -->
+            </div>
+
+            <!-- Prize Ticket Dotted Coupon container -->
+            <div class="prize-ticket-box" id="visitor-results-ticket" style="width: 100%; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 10px 25px rgba(139, 92, 246, 0.15);">
+              <!-- Rendered dynamically by JS -->
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:6px; width:100%; margin-top:12px;">
+              <button class="btn btn-pro" id="btn-collect-prize" onclick="app.visitorCollectPrize()" style="padding: 10px; font-size:11px; margin:0; width:100%; font-weight:700;">
+                🎁 Забрать награду и выйти
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 6: LIMIT LOCKOUT EXCEEDED SCREEN -->
+        <div id="visitor-lockout-panel" class="view-panel">
+          <div class="visitor-block-screen">
+            <div class="visitor-block-icon">⏳</div>
+            <h3 style="font-size: 16px; font-weight: 700; color: var(--gold);">Лимит игр исчерпан</h3>
+            <p style="font-size: 12px; color: var(--text-muted); max-width: 280px; line-height: 1.4;">
+              Вы сыграли установленный лимит игр на данный сеанс. 
+              <br><br>
+              Спасибо, что проводите время с нами! Пожалуйста, обратитесь к администратору, если у вас возникли вопросы.
+            </p>
+            
+            <div class="limit-lockout-box">
+              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Следующий вход доступен через:</div>
+              <div class="countdown-timer" id="lockout-countdown-display">02:59:59</div>
+            </div>
+
+            <button class="btn btn-secondary" onclick="app.resetVisitorSession()" style="margin-top: 12px;">
+              Сбросить симуляцию гостя
+            </button>
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 7: CONNECTION LOST SCREEN -->
+        <div id="visitor-disconnected-panel" class="view-panel" style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 50px; margin-bottom: 20px; animation: lockFloat 1.8s infinite;">🔌</div>
+          <h3 style="color: var(--error); font-size: 16px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase;">Связь прервана</h3>
+          <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px;" id="visitor-disconnect-reason-txt">
+            Выбранная игра временно недоступна.
+          </p>
+          <div style="background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--border-light); border-radius: 12px; padding: 12px; font-size: 11px; text-align: center; margin-bottom: 20px; color: var(--text-muted);">
+            Возвращение в меню игр...
+          </div>
+          <button class="btn btn-secondary" onclick="app.setVisitorViewPanel('lobby')" style="width: 100%;">
+            Вернуться в лобби
+          </button>
+        </div>
+
+        <!-- Toast for visitor screen -->
+        <div id="visitor-toast" class="toast"></div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM PANEL: DEVELOPER / TESTING MOCK CONTROLS -->
+  <div class="debug-bar" id="creator-console-block" style="transition: font-size 0.2s ease;">
+    <div class="debug-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <span>🛠️ ПАНЕЛЬ ОТЛАДКИ И ТЕСТИРОВАНИЯ (ДЛЯ РАЗРАБОТЧИКА)</span>
+      <!-- Scale & Fullscreen Controls -->
+      <div style="display:flex; gap:10px; align-items:center; font-weight: normal;">
+        <div style="font-size:9px; color:var(--text-muted); display:flex; align-items:center; gap:4px;">
+          <span>🔍 Масштаб:</span>
+          <select id="creator-scale-select" onchange="app.setCreatorScale(this.value)" style="background:rgba(0,0,0,0.3); border:1px solid var(--border-light); color:#fff; font-size:9px; border-radius:4px; padding:1px 4px; cursor:pointer; font-family:inherit;">
+            <option value="100%">100%</option>
+            <option value="115%">115%</option>
+            <option value="130%">130%</option>
+            <option value="150%">150%</option>
+          </select>
+        </div>
+        <button id="btn-creator-fullscreen" class="debug-btn-mini" style="border-color:var(--gold); color:var(--gold); font-size:9px; padding:2px 6px; margin:0;" onclick="app.toggleCreatorFullscreen()">
+          🖥️ Развернуть во весь экран
+        </button>
+      </div>
+    </div>
+    
+    <!-- CREATOR PANEL (DATABASE & TICKETS CONSOLE) -->
+    <div style="border-top:1px solid var(--border-light); padding-top:10px; margin-top:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:10px; font-weight:700; color:var(--primary); text-transform:uppercase;">
+          📁 ПАНЕЛЬ СОЗДАТЕЛЯ WAITPLAY (КОНСОЛЬ УПРАВЛЕНИЯ)
+        </span>
+      </div>
+
+      <!-- GLOBAL CREATOR ANALYTICS STATS CARDS -->
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px;">
+        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid var(--border-light); border-radius: 10px; padding: 8px; text-align: center;">
+          <div style="font-size: 8px; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">👥 Аккаунтов в системе</div>
+          <div id="creator-stat-clients" style="font-size: 15px; font-weight: 800; color: var(--gold); margin-top: 2px;">0</div>
+        </div>
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px; padding: 8px; text-align: center;">
+          <div style="font-size: 8px; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">🚫 Заблокировано</div>
+          <div id="creator-stat-banned" style="font-size: 15px; font-weight: 800; color: #f87171; margin-top: 2px;">0</div>
+        </div>
+        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 10px; padding: 8px; text-align: center;">
+          <div style="font-size: 8px; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">🔒 Активные заявки</div>
+          <div id="creator-stat-tickets" style="font-size: 15px; font-weight: 800; color: #fbbf24; margin-top: 2px;">0</div>
+        </div>
+      </div>
+
+      <!-- Creator Console Navigation Tabs -->
+      <div style="display:flex; gap:10px; border-bottom:1px solid var(--border-light); padding-bottom:5px; margin-bottom:10px;">
+        <button id="btn-creator-tab-tickets" style="background:none; border:none; color:var(--gold); font-size:11px; font-weight:700; cursor:pointer; border-bottom:2px solid var(--gold);" onclick="app.setCreatorTab('tickets')">
+          🔒 Заявки <span id="creator-badge-tickets" style="background:var(--error); color:#fff; font-size:8px; padding:1px 5px; border-radius:10px; display:none; margin-left:3px;">0</span>
+        </button>
+        <button id="btn-creator-tab-feedbacks" style="background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setCreatorTab('feedbacks')">
+          💡 Идеи и Отзывы <span id="creator-badge-feedbacks" style="background:var(--gold); color:#110e1f; font-size:8px; padding:1px 5px; border-radius:10px; display:none; margin-left:3px;">0</span>
+        </button>
+        <button id="btn-creator-tab-clients" style="background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setCreatorTab('clients')">
+          👥 База клиентов <span id="creator-badge-clients" style="background:var(--success); color:#fff; font-size:8px; padding:1px 5px; border-radius:10px; display:none; margin-left:3px;">0</span>
+        </button>
+        <button id="btn-creator-tab-search" style="background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setCreatorTab('search')">
+          🔍 Поиск по БД
+        </button>
+        <button id="btn-creator-tab-settings" style="background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer;" onclick="app.setCreatorTab('settings')">
+          ⚙️ Настройки
+        </button>
+      </div>
+
+      <!-- Tab Content: Tickets List (Recovery) -->
+      <div id="creator-view-tickets" style="display:block;">
+        <div id="creator-tickets-list-only" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto;">
+          <div style="font-size:9px; color:var(--text-muted); font-style:italic;">Заявки на сброс отсутствуют.</div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Feedbacks List -->
+      <div id="creator-view-feedbacks" style="display:none;">
+        <div id="creator-feedbacks-list-only" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto;">
+          <div style="font-size:9px; color:var(--text-muted); font-style:italic;">Отзывы и предложения отсутствуют.</div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Clients List (All Users Database) -->
+      <div id="creator-view-clients" style="display:none;">
+        <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px; display:flex; justify-content:space-between;">
+          <span>Список всех зарегистрированных заведений в системе:</span>
+          <span>Всего в БД: <strong id="creator-total-clients-count" style="color:var(--success);">3</strong></span>
+        </div>
+        <div id="creator-clients-list-table" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto;">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- Tab Content: Database Search Console -->
+      <div id="creator-view-search" style="display:none; position: relative;">
+        <div style="display:flex; gap:8px; margin-bottom:10px; position: relative;">
+          <input type="text" id="creator-search-input" placeholder="Введите Email, Телефон или порядковый номер клиента (#)..." style="flex:1; padding: 6px 10px; font-size:11px; background:rgba(0,0,0,0.3); border:1px solid var(--border-light); border-radius:8px; color:#fff; font-family:inherit; position:relative; z-index:101;">
+          <button class="btn btn-primary" style="width:auto; padding:6px 12px; font-size:11px; margin:0;" onclick="app.creatorSearchDatabase()">Поиск 🔍</button>
+          
+          <!-- Live Auto-Suggestions Box (Instagram-like) -->
+          <div id="creator-search-suggestions" style="display:none; position: absolute; top: 100%; left: 0; right: 0; background: #1a1631; border: 1px solid var(--border-light); border-radius: 8px; z-index: 100; max-height: 120px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.5); margin-top: 4px; padding: 4px 0;">
+          </div>
+        </div>
+        <div id="creator-search-results" style="background:rgba(255,255,255,0.02); border:1px dashed var(--border-light); border-radius:12px; padding:10px; font-size:11px; text-align:center; color:var(--text-muted);">
+          Введите email, телефон или порядковый номер клиента для поиска информации по базе данных.
+        </div>
+      </div>
+
+      <!-- Tab Content: Settings Panel -->
+      <div id="creator-view-settings" style="display:none; font-size:11px; text-align:left; color:#fff;">
+        <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+          ⚙️ Системные настройки и модерация платформы WaitPlay:
+        </div>
+        
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:12px;">
+          <!-- Column 1: Mode Switches -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <h4 style="font-size:9px; color:var(--primary); text-transform:uppercase; margin:0 0 4px 0;">🌐 Статус платформы</h4>
+            
+            <!-- Maintenance Mode Toggle -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:8px; padding:6px 10px;">
+              <div>
+                <strong>Технические работы</strong><br>
+                <span style="font-size:8px; color:var(--text-muted);">Блокирует доступ всем заведениям</span>
+              </div>
+              <input type="checkbox" id="settings-maintenance-toggle" onchange="app.toggleMaintenanceMode(this.checked)" style="cursor:pointer; width:16px; height:16px;">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- VISITOR GAME RULES MODAL -->
+  <div id="visitor-rules-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 300px; background: #18142c; border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); position: relative;">
+      <div style="font-size: 36px; margin-bottom: 8px;" id="visitor-rules-icon">📋</div>
+      <h3 style="font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--gold);" id="visitor-rules-title">Правила игры</h3>
+      <div style="font-size: 11px; color: var(--text-main); line-height: 1.5; margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);" id="visitor-rules-content">
+        Описание правил...
+      </div>
+      <button class="btn btn-primary" style="padding: 8px 16px; font-size: 12px; width: 100%; border-radius: 8px; margin: 0;" onclick="app.closeVisitorRulesModal()">
+        Понятно
+      </button>
+    </div>
+  </div>
+
+  <!-- GUESSWORD WHOLE WORD MODAL OVERLAY -->
+  <div id="guessword-wholeword-modal" class="modal-overlay" style="z-index: 9999;">
+    <div class="modal-content" style="text-align: center; max-width: 300px; background: #18142c; border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);">
+      <div style="font-size: 32px; margin-bottom: 8px;">🗣️</div>
+      <h3 style="font-size: 14px; font-weight: 800; color: var(--gold); margin-bottom: 4px; text-transform: uppercase;">Назвать слово целиком</h3>
+      <p style="font-size: 9px; color: var(--text-muted); line-height: 1.45; margin-bottom: 12px;">
+        Введите слово полностью на русском языке.<br>Если вы ошибётесь, ваш ход мгновенно сгорит!
+      </p>
+      <input type="text" id="guessword-wholeword-input" placeholder="ВВЕДИТЕ СЛОВО..." style="width: 100%; padding: 10px; font-size: 12px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 8px; color: #fff; text-transform: uppercase; text-align: center; outline: none; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px; font-family: inherit;">
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="app.closeGuessWordWholeWordModal()" style="flex: 1; padding: 8px; font-size: 10px; margin: 0; border-radius: 8px;">Отмена</button>
+        <button class="btn btn-primary" onclick="app.submitGuessWordWholeWordFromModal()" style="flex: 1; padding: 8px; font-size: 10px; margin: 0; border-radius: 8px; font-weight: 700;">Проверить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI GAME OUT OF LIMITS MODAL -->
+  <div id="ai-limits-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 320px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);">
+      <div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>
+      <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--error);">Превышены рамки генератора</h3>
+      <p style="font-size: 12px; color: var(--text-main); line-height: 1.5; margin-bottom: 15px;">
+        Ваш запрос вышел из рамок генератора игр. Поэтому ваш запрос мы не можем технически исполнять.
+      </p>
+      <button class="btn btn-primary" style="padding: 8px 16px; font-size: 12px; width: 80px; margin: 0 auto; display: block;" onclick="document.getElementById('ai-limits-modal').classList.remove('active')">
+        OK
+      </button>
+    </div>
+  </div>
+
+  <!-- GPS RELOCATION CONFIRMATION MODAL -->
+  <div id="relocation-confirm-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 340px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);">
+      <div style="font-size: 32px; margin-bottom: 10px;">📍</div>
+      <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--gold);">Обновление геоданных заведения</h3>
+      <p style="font-size: 12px; color: var(--text-main); line-height: 1.5; margin-bottom: 15px;" id="relocation-modal-text">
+        Хотите ли вы обновить фиксированные координаты (GPS и Wi-Fi) вашего заведения на ваши текущие координаты?
+      </p>
+      
+      <!-- Warning box that shows when they want to change -->
+      <div id="relocation-warning-detail" style="display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 12px; padding: 10px; font-size: 11px; color: var(--error); margin-bottom: 15px; text-align: left; line-height: 1.4;">
+        ⚠️ <strong>Важное предупреждение:</strong><br>
+        Если вы хотите привязать другое заведение, вы должны находиться <strong>физически прямо в нем</strong> в данный момент. Иначе гости не смогут войти в лобби!
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;" id="relocation-step-1-buttons">
+        <button class="btn btn-pro" style="padding: 8px 16px; font-size: 12px;" onclick="app.relocationHandleStep1(true)">
+          Да, сменить геоданные
+        </button>
+        <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 12px;" onclick="app.relocationHandleStep1(false)">
+          Нет, оставить прежние координаты
+        </button>
+      </div>
+
+      <div style="display: none; flex-direction: column; gap: 8px;" id="relocation-step-2-buttons">
+        <button class="btn btn-danger" style="padding: 8px 16px; font-size: 12px;" onclick="app.relocationConfirmUpdate(true)">
+          Да, я на месте. Обновить координаты 👍
+        </button>
+        <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 12px;" onclick="app.relocationConfirmUpdate(false)">
+          Отмена (Оставить прежние)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GOOGLE OAUTH MODAL -->
+  <div id="google-auth-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 340px; background: #18181b; border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);">
+      <div style="display:flex; justify-content:center; align-items:center; gap:8px; margin-bottom:12px;">
+        <svg width="24" height="24" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.74-.06-1.28-.19-1.84H9v3.34h4.96c-.1.83-.64 2.08-1.84 2.92l2.84 2.2c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.84-2.2c-.76.53-1.78.9-3.12.9-2.38 0-4.41-1.57-5.14-3.74L.88 13.04C2.38 16.02 5.45 18 9 18z"/><path fill="#FBBC05" d="M3.86 10.78c-.18-.53-.28-1.09-.28-1.78s.1-1.25.28-1.78L.88 4.96C.32 6.08 0 7.4 0 9s.32 2.92.88 4.04l2.98-2.26z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.34l2.58-2.58C13.46.89 11.43 0 9 0 5.45 0 2.38 1.98.88 4.96l2.98 2.26C4.59 5.15 6.62 3.58 9 3.58z"/></svg>
+        <span style="font-size:15px; font-weight:700; color:#fff;">Вход через Google</span>
+      </div>
+      <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 15px;">Выберите аккаунт для продолжения в WaitPlay:</p>
+      
+      <div id="google-accounts-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom:15px;">
+        <!-- Populated dynamically -->
+      </div>
+      
+      <button class="btn btn-secondary" style="width:100%; padding:8px; font-size:11px;" onclick="app.closeGoogleAuthModal()">
+        Отмена
+      </button>
+    </div>
+  </div>
+
+  <!-- ACCOUNT PROFILE MODAL (Triggered by clicking venue name badge) -->
+  <div id="account-profile-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 340px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);">
+      <div style="font-size: 32px; margin-bottom: 8px;">👤</div>
+      <h3 style="font-size: 15px; font-weight: 700; color: var(--gold); margin-bottom: 4px;">Профиль локации</h3>
+      <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 15px;">Управление именем, email и безопасностью.</p>
+      
+      <!-- Info Cards (Separated for Branch Name and Email Editing) -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 15px; text-align:left;">
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-light); border-radius: 12px; padding: 10px 12px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:9px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Название локации</div>
+            <div style="font-size:12px; font-weight:700; color:#fff;" id="profile-branch-name">-</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 8px; font-size:10px; width:auto; border-radius:6px; margin:0;" onclick="app.editBranchNameModal()">
+            ✏️ Изменить
+          </button>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-light); border-radius: 12px; padding: 10px 12px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:9px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Email аккаунта</div>
+            <div style="font-size:11px; font-weight:600; color:var(--text-muted);" id="profile-email">-</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 8px; font-size:10px; width:auto; border-radius:6px; margin:0;" onclick="app.editAccountEmailModal()">
+            ✏️ Изменить
+          </button>
+        </div>
+      </div>
+
+      <!-- Action Buttons Stack -->
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <button class="btn btn-secondary" style="padding: 10px; font-size: 11px; margin: 0; width:100%; color: #fca5a5; border-color: rgba(239, 68, 68, 0.2);" onclick="app.resetAdminDeviceConfirm()">
+          🚪 Выйти из аккаунта
+        </button>
+
+        <button class="btn btn-danger" style="padding: 10px; font-size: 11px; margin: 0; width:100%;" onclick="app.deleteActiveBranch()">
+          🗑️ Удалить эту локацию (аккаунт)
+        </button>
+        
+        <button class="btn btn-secondary" style="padding: 10px; font-size: 11px; margin: 6px 0 0 0; width:100%;" onclick="app.closeAccountProfileModal()">
+          Закрыть профиль
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VENUE GAME LIMITS MODAL (Triggered by ⚙️ Настройки button) -->
+  <div id="venue-game-limits-modal" class="modal-overlay">
+    <div class="modal-content" style="text-align: center; max-width: 340px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);">
+      <div style="font-size: 32px; margin-bottom: 8px;">⚙️</div>
+      <h3 style="font-size: 15px; font-weight: 700; color: var(--gold); margin-bottom: 4px;">Параметры и лимиты игр</h3>
+      <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 15px;">Настройка правил доступности игр для игроков.</p>
+      
+      <!-- B2C Game Limits Config Block -->
+      <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 12px; padding: 12px; font-size: 11px; text-align: left; margin-bottom: 15px;">
+        <div style="font-weight: 700; color: var(--gold); margin-bottom: 8px; font-size: 11px;">🎮 Лимиты игр для игроков:</div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">Максимум игр до блокировки</label>
+          <select id="settings-limit-games" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit;">
+            <option value="1">1 игра</option>
+            <option value="2">2 игры (дефолт)</option>
+            <option value="3">3 игры</option>
+            <option value="5">5 игр</option>
+            <option value="999">Без лимита игр</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">Время ожидания (блокировки)</label>
+          <select id="settings-limit-hours" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
+            <option value="1">1 час</option>
+            <option value="2">2 часа</option>
+            <option value="3">3 часа (дефолт)</option>
+            <option value="0">Без блокировки</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">👥 Вместимость игроков локации (максимум):</label>
+          <select id="settings-max-players" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
+            <option value="15" selected>15 человек (Максимум)</option>
+            <option value="10">10 человек</option>
+            <option value="5">5 человек</option>
+            <option value="2">2 человека</option>
+            <option value="0">0 человек (Заблокировать вход всем 🔒)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">При ничьей в играх:</label>
+          <select id="settings-quiz-tie" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
+            <option value="deny" selected>Никому не выдавать приз при ничьей (дефолт)</option>
+            <option value="give">Выдавать призы игрокам с одинаковыми очками</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn btn-secondary" style="padding: 12px; font-size: 12px; font-weight:700; margin: 0; width:100%;" onclick="app.closeVenueGameLimitsModal()">
+        Закрыть настройки ✖
+      </button>
+    </div>
+  </div>
+
+  <!-- CSS for Google Play sheet & b2b mock ads -->
+  <style>
+    #google-play-billing-sheet {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 15000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #google-play-billing-sheet.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .google-play-sheet {
+      width: 100%;
+      max-width: 480px;
+      background: #1f1f1f;
+      border-top-left-radius: 24px;
+      border-top-right-radius: 24px;
+      padding: 16px 20px 24px 20px;
+      box-sizing: border-box;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.1, 0.76, 0.55, 0.94);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #e3e3e3;
+      box-shadow: 0 -10px 40px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    #google-play-billing-sheet.active .google-play-sheet {
+      transform: translateY(0);
+    }
+    .gp-handle {
+      width: 40px;
+      height: 4px;
+      background: #444746;
+      border-radius: 2px;
+      margin: 0 auto 16px auto;
+    }
+    .gp-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .gp-app-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--gold), var(--primary));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .gp-app-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      text-align: left;
+    }
+    .gp-app-subtitle {
+      font-size: 11px;
+      color: #9aa0a6;
+      text-align: left;
+    }
+    .gp-divider {
+      height: 1px;
+      background: #3c4043;
+      margin: 16px 0;
+    }
+    .gp-detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .gp-price {
+      color: #fff;
+    }
+    .gp-subtext {
+      font-size: 10px;
+      color: #9aa0a6;
+      line-height: 1.4;
+      text-align: left;
+    }
+    .gp-payment-method {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #2d2d30;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    .gp-card-text {
+      flex-grow: 1;
+      text-align: left;
+      color: #e3e3e3;
+    }
+    .gp-card-arrow {
+      font-size: 9px;
+      color: #9aa0a6;
+    }
+    .btn-gp-buy {
+      width: 100%;
+      background: #00875f;
+      border: none;
+      border-radius: 24px;
+      color: #fff;
+      padding: 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 18px;
+      transition: background 0.2s;
+      outline: none;
+    }
+    .btn-gp-buy:hover {
+      background: #009e6f;
+    }
+    .btn-gp-cancel {
+      width: 100%;
+      background: transparent;
+      border: 1px solid #3c4043;
+      border-radius: 24px;
+      color: #9aa0a6;
+      padding: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      outline: none;
+    }
+    .btn-gp-cancel:hover {
+      color: #fff;
+    }
+  </style>
+
+  <!-- Simulated Google Play Billing Bottom Sheet -->
+  <div id="google-play-billing-sheet" class="modal-overlay">
+    <div class="google-play-sheet">
+      <div class="gp-handle"></div>
+      <div class="gp-header">
+        <div class="gp-app-icon">👑</div>
+        <div class="gp-app-info">
+          <div class="gp-app-title">WaitPlay Premium (Подписка)</div>
+          <div class="gp-app-subtitle">WaitPlay Inc. • Инструменты для бизнеса</div>
+        </div>
+      </div>
+      
+      <div class="gp-divider"></div>
+      
+      <div class="gp-details">
+        <div class="gp-detail-row">
+          <span class="gp-label">Premium подписка (1 месяц)</span>
+          <span class="gp-price">499,00 ₽</span>
+        </div>
+        <div class="gp-subtext">Списание начнется автоматически. Отмена подписки в любое время в Google Play. Комиссия маркета 15% включена. Подписка отключает рекламу в приложении и открывает доступ к ИИ-генератору и дополнительным играм.</div>
+      </div>
+      
+      <div class="gp-divider"></div>
+      
+      <div class="gp-payment-method">
+        <span class="gp-card-icon">💳</span>
+        <span class="gp-card-text">Google Pay (Visa •••• 4242)</span>
+        <span class="gp-card-arrow">▶</span>
+      </div>
+      
+      <button class="btn-gp-buy" onclick="app.processGooglePlayPurchase()">
+        Купить в 1 клик
+      </button>
+      
+      <button class="btn-gp-cancel" onclick="app.closeGooglePlayBilling()">Отмена</button>
+    </div>
+  </div>
+
+  <!-- Simulated B2B Ads Overlay -->
+  <div id="mock-ad-overlay" class="modal-overlay" style="background:#0b0a13; z-index:20000; flex-direction:column; display:none; align-items:center; justify-content:center;">
+    <div style="width:90%; max-width:400px; background:#141226; border:1px solid var(--border-light); border-radius:20px; padding:20px; box-sizing:border-box; text-align:center; position:relative; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+      
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <span style="background:rgba(255,255,255,0.1); font-size:9px; color:#fff; padding:2px 6px; border-radius:4px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Реклама</span>
+        <span id="ad-countdown" style="font-size:11px; color:var(--gold); font-weight:800;">Пропустить через 10 сек...</span>
+      </div>
+      
+      <button id="btn-close-ad" onclick="app.closeMockAd()" style="position:absolute; top:12px; right:12px; background:none; border:none; color:var(--text-muted); font-size:16px; cursor:pointer; display:none; outline:none;">✖</button>
+      
+      <div class="ad-banner-body" style="height:220px; background:linear-gradient(135deg, #1d4ed8, #7c3aed); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:15px; box-sizing:border-box; color:#fff; overflow:hidden; margin-bottom:15px; position:relative;">
+        <div style="font-size:48px; margin-bottom:10px; animation: pulse 1.5s infinite;">💎</div>
+        <div style="font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Устали от рекламы?</div>
+        <div style="font-size:10px; color:#c084fc; font-weight:600; line-height:1.4; max-width:240px; margin:0 auto 10px auto;">
+          Подключите <b>WaitPlay Premium</b> и навсегда заблокируйте рекламу, открыв ИИ-генератор и все игры!
+        </div>
+        <button onclick="app.openPremiumFromAd()" style="background:var(--gold); border:none; color:#0b0a13; font-weight:800; font-size:11px; padding:8px 16px; border-radius:20px; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.3); outline:none;">
+          КУПИТЬ PREMIUM ▶
+        </button>
+      </div>
+      
+      <div style="font-size:9px; color:var(--text-muted);">Реклама спонсора WaitPlay Cloud Services</div>
+    </div>
+  </div>
+
+
+
+  <script>
+    // Force remove Netlify Badge footer dynamically from DOM and Shadow DOM
+    setInterval(function() {
+      try {
+        var badges = document.querySelectorAll('netlify-drawer, #netlify-notification-root, [data-netlify-drawer], [class*="netlify"], [id*="netlify"], iframe[src*="netlify"], [data-netlify]');
+        badges.forEach(function(el) { 
+          if (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK') {
+            el.remove();
+          }
+        });
+        var allEls = document.querySelectorAll('*');
+        for (var i = 0; i < allEls.length; i++) {
+          if (allEls[i].shadowRoot) {
+            var sBadges = allEls[i].shadowRoot.querySelectorAll('[class*="netlify"], [id*="netlify"], netlify-drawer');
+            sBadges.forEach(function(s) { s.remove(); });
+          }
+        }
+      } catch(e) {}
+    }, 200);
+  </script>
+
+</body>
+</html>
