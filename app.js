@@ -3431,6 +3431,7 @@ class WaitPlayApp {
     this.updateAdminPanelSwitcherDropdown();
     this.renderRegQuickAccounts();
     this.renderAdminAccountSwitcher();
+    this.renderAdminGamesGrid();
     this.updateAdminQrCode();
   }
   updateAdminPanelSwitcherDropdown() {
@@ -10498,6 +10499,59 @@ class WaitPlayApp {
         </svg>
       </div>
     `;
+  }
+
+  openVenueGameLimitsModal() {
+    try {
+      let modal = document.getElementById('settings-modal');
+      if (!modal) {
+        modal = document.getElementById('venue-limits-modal');
+      }
+      if (modal) {
+        modal.style.display = 'flex';
+        modal.classList.add('active');
+        
+        // Sync values to elements
+        const maxPlayersSelect = document.getElementById('settings-max-players');
+        if (maxPlayersSelect && this.state.maxVenuePlayers !== undefined) {
+          maxPlayersSelect.value = String(this.state.maxVenuePlayers);
+        }
+        
+        const tieSelect = document.getElementById('settings-quiz-tie');
+        if (tieSelect && this.state.quizTieWinnerBehavior) {
+          tieSelect.value = this.state.quizTieWinnerBehavior;
+        }
+
+        const botModeSelect = document.getElementById('settings-bot-mode');
+        if (botModeSelect && this.state.botMode) {
+          botModeSelect.value = this.state.botMode;
+        }
+
+        const botDiffSelect = document.getElementById('settings-bot-difficulty');
+        if (botDiffSelect && this.state.botDifficulty) {
+          botDiffSelect.value = this.state.botDifficulty;
+        }
+      } else {
+        console.error("settings-modal not found!");
+      }
+    } catch(e) {
+      console.error("Error in openVenueGameLimitsModal:", e);
+    }
+  }
+
+  closeVenueGameLimitsModal() {
+    try {
+      let modal = document.getElementById('settings-modal');
+      if (!modal) {
+        modal = document.getElementById('venue-limits-modal');
+      }
+      if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+      }
+    } catch(e) {
+      console.error("Error in closeVenueGameLimitsModal:", e);
+    }
   }
 
   updateAdminQrCode() {
