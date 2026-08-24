@@ -339,25 +339,14 @@ class WaitPlayApp {
 
   init() {
     try {
-      this.initDatabaseClients();
-      this.loadState();
-      
-      this.normalizeGameNames();
-      
-      // Auto-load active branch context on reload (F5) to persist settings & game states
-      if (this.state.email && this.state.activeBranchId) {
-        this.loadBranchContext(this.state.email, this.state.activeBranchId);
-      }
-      
-      this.normalizeGameNames();
-      this.sortGames();
-      this.initDOM();
-      // Check if URL query contains guest mode params (?role=guest, ?guest=1, ?loc=...)
+      // Check if URL query contains guest mode params (?role=guest, ?guest=1, ?loc=...) FIRST!
       const urlParams = new URLSearchParams(window.location.search);
       const isGuestUrl = (urlParams.has('role') && urlParams.get('role') === 'guest') || urlParams.has('guest') || urlParams.has('loc');
       
       if (isGuestUrl) {
         this.state.isVisitorMode = true;
+        this.state.email = null; // Clear admin email for guest context!
+        this.initDOM();
         
         // Hide Admin frame completely, show Visitor frame for Guest Phone!
         const allFrames = document.querySelectorAll('.phone-frame');
@@ -379,19 +368,34 @@ class WaitPlayApp {
           this.initVisitorLobby();
           this.showToast("🎮 Добро пожаловать в игровое пространство!", false);
         }
-      } else {
-        const allFrames = document.querySelectorAll('.phone-frame');
-        allFrames.forEach(f => {
-          if (f.id === 'visitor-frame') {
-            f.style.display = 'none';
-          } else {
-            f.style.display = 'block';
-          }
-        });
-
-        this.updateAdminView();
-        this.updateVisitorView();
+        return; // STOP execution here so admin context never loads for guest!
       }
+
+      this.initDatabaseClients();
+      this.loadState();
+      
+      this.normalizeGameNames();
+      
+      // Auto-load active branch context on reload (F5) to persist settings & game states
+      if (this.state.email && this.state.activeBranchId) {
+        this.loadBranchContext(this.state.email, this.state.activeBranchId);
+      }
+      
+      this.normalizeGameNames();
+      this.sortGames();
+      this.initDOM();
+
+      const allFrames = document.querySelectorAll('.phone-frame');
+      allFrames.forEach(f => {
+        if (f.id === 'visitor-frame') {
+          f.style.display = 'none';
+        } else {
+          f.style.display = 'block';
+        }
+      });
+
+      this.updateAdminView();
+      this.updateVisitorView();
 
       this.startLockoutTicker();
       this.recalculateDistances();
@@ -10503,15 +10507,11 @@ class WaitPlayApp {
 
   openVenueGameLimitsModal() {
     try {
-      let modal = document.getElementById('settings-modal');
-      if (!modal) {
-        modal = document.getElementById('venue-limits-modal');
-      }
+      const modal = document.getElementById('venue-game-limits-modal') || document.getElementById('venue-limits-modal') || document.getElementById('settings-modal');
       if (modal) {
         modal.style.display = 'flex';
         modal.classList.add('active');
         
-        // Sync values to elements
         const maxPlayersSelect = document.getElementById('settings-max-players');
         if (maxPlayersSelect && this.state.maxVenuePlayers !== undefined) {
           maxPlayersSelect.value = String(this.state.maxVenuePlayers);
@@ -10532,7 +10532,7 @@ class WaitPlayApp {
           botDiffSelect.value = this.state.botDifficulty;
         }
       } else {
-        console.error("settings-modal not found!");
+        console.error("venue-game-limits-modal not found!");
       }
     } catch(e) {
       console.error("Error in openVenueGameLimitsModal:", e);
@@ -10541,10 +10541,7 @@ class WaitPlayApp {
 
   closeVenueGameLimitsModal() {
     try {
-      let modal = document.getElementById('settings-modal');
-      if (!modal) {
-        modal = document.getElementById('venue-limits-modal');
-      }
+      const modal = document.getElementById('venue-game-limits-modal') || document.getElementById('venue-limits-modal') || document.getElementById('settings-modal');
       if (modal) {
         modal.style.display = 'none';
         modal.classList.remove('active');
