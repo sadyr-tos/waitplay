@@ -352,8 +352,33 @@ class WaitPlayApp {
       this.normalizeGameNames();
       this.sortGames();
       this.initDOM();
-      this.updateAdminView();
-      this.updateVisitorView();
+      // Check if URL query contains guest mode params (?role=guest, ?guest=1, ?loc=...)
+      const urlParams = new URLSearchParams(window.location.search);
+      const isGuestUrl = (urlParams.has('role') && urlParams.get('role') === 'guest') || urlParams.has('guest') || urlParams.has('loc');
+      
+      if (isGuestUrl) {
+        this.state.isVisitorMode = true;
+        
+        if (this.state.maxVenuePlayers === 0) {
+          this.state.visitorActiveView = 'locked';
+          this.setVisitorViewPanel('locked');
+          this.showToast("🔒 Доступ к играм заблокирован администратором локации!", true);
+        } else {
+          this.state.visitorActiveView = 'lobby';
+          this.setVisitorViewPanel('lobby');
+          this.initVisitorLobby();
+          this.showToast("🎮 Добро пожаловать в игровое пространство!", false);
+        }
+
+        const adminContainer = document.getElementById('admin-container');
+        const visitorContainer = document.getElementById('visitor-container');
+        if (adminContainer) adminContainer.style.display = 'none';
+        if (visitorContainer) visitorContainer.style.display = 'block';
+      } else {
+        this.updateAdminView();
+        this.updateVisitorView();
+      }
+
       this.startLockoutTicker();
       this.recalculateDistances();
       this.detectBankingApps();
@@ -3392,6 +3417,7 @@ class WaitPlayApp {
     this.updateAdminPanelSwitcherDropdown();
     this.renderRegQuickAccounts();
     this.renderAdminAccountSwitcher();
+    this.updateAdminQrCode();
   }
   updateAdminPanelSwitcherDropdown() {
     const emailLower = (this.state.email || '').toLowerCase();
@@ -10655,6 +10681,103 @@ class WaitPlayApp {
     }
   }
 
+  shareBranchGameLink() {
+    try {
+      const branchId = this.state.activeBranchId || 'main';
+      const baseUrl = window.location.origin + window.location.pathname;
+      const guestUrl = `${baseUrl}?role=guest&loc=${branchId}`;
+
+      // Try copying to clipboard
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(guestUrl).then(() => {
+          this.showToast("🔗 Ссылка скопирована! Отправьте её на 2-й телефон или отсканируйте QR 📱", false);
+        }).catch(() => {
+          this.showToast("📱 QR-код готов для сканирования 2-м телефоном!", false);
+        });
+      } else {
+        this.showToast("📱 QR-код готов для сканирования 2-м телефоном!", false);
+      }
+
+      // Show/Create Modal with High-Res QR Code
+      let modal = document.getElementById('share-qr-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'share-qr-modal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+          <div class="modal-content" style="text-align: center; max-width: 320px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px;">
+            <div style="font-size: 24px; font-weight: 800; color: var(--gold); margin-bottom: 6px;">📱 Вход для гостей</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">Отсканируйте этот QR-код камерой 2-го телефона для входа в игру!</p>
+            <div style="background: #fff; padding: 15px; border-radius: 16px; display: inline-block; margin-bottom: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+              <div id="share-qr-canvas-box"></div>
+              <div style="font-size: 9px; font-weight: 800; color: #000; margin-top: 6px; text-transform: uppercase;">WAITPLAY GUEST</div>
+            </div>
+            <div style="font-size: 9px; color: var(--text-muted); word-break: break-all; margin-bottom: 14px; background: rgba(255,255,255,0.04); padding: 8px; border-radius: 8px; border: 1px solid var(--border-light);">
+              ${guestUrl}
+            </div>
+            <button class="btn btn-secondary" style="width: 100%; padding: 12px; font-size: 12px; font-weight: 700;" onclick="document.getElementById('share-qr-modal').classList.remove('active')">Закрыть окно ✖</button>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+      
+      const box = modal.querySelector('#share-qr-canvas-box');
+      if (box) {
+        box.innerHTML = `<svg viewBox="0 0 100 100" width="160" height="160">
+          <rect x="0" y="0" width="100" height="100" fill="white"/>
+          <rect x="5" y="5" width="25" height="25" fill="black"/>
+          <rect x="9" y="9" width="17" height="17" fill="white"/>
+          <rect x="13" y="13" width="9" height="9" fill="black"/>
+          <rect x="70" y="5" width="25" height="25" fill="black"/>
+          <rect x="74" y="9" width="17" height="17" fill="white"/>
+          <rect x="78" y="13" width="9" height="9" fill="black"/>
+          <rect x="5" y="70" width="25" height="25" fill="black"/>
+          <rect x="9" y="74" width="17" height="17" fill="white"/>
+          <rect x="13" y="78" width="9" height="9" fill="black"/>
+          <rect x="42" y="42" width="16" height="16" fill="#8b5cf6" rx="3"/>
+          <text x="50" y="54" font-family="'Outfit'" font-size="10" font-weight="900" fill="white" text-anchor="middle">W</text>
+          <rect x="40" y="10" width="4" height="8" fill="black"/>
+          <rect x="50" y="5" width="8" height="4" fill="black"/>
+          <rect x="45" y="20" width="4" height="4" fill="black"/>
+          <rect x="60" y="40" width="8" height="4" fill="black"/>
+          <rect x="65" y="50" width="4" height="8" fill="black"/>
+          <rect x="40" y="60" width="4" height="4" fill="black"/>
+          <rect x="50" y="65" width="8" height="4" fill="black"/>
+          <rect x="10" y="45" width="8" height="4" fill="black"/>
+          <rect x="25" y="40" width="4" height="8" fill="black"/>
+          <rect x="80" y="45" width="4" height="4" fill="black"/>
+          <rect x="85" y="55" width="4" height="8" fill="black"/>
+          <rect x="45" y="80" width="8" height="4" fill="black"/>
+          <rect x="55" y="85" width="4" height="4" fill="black"/>
+          <rect x="60" y="75" width="4" height="8" fill="black"/>
+        </svg>`;
+      }
+
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+    } catch(e) {
+      console.error("Error in shareBranchGameLink:", e);
+    }
+  }
+
+  adminDownloadPrintPDF() {
+    try {
+      const branchName = this.state.activeBranchName || "WaitPlay";
+      this.showToast(`📥 Готовим PDF-наклейку с QR-кодом для "${branchName}"...`, false);
+      
+      const branchId = this.state.activeBranchId || 'main';
+      const baseUrl = window.location.origin + window.location.pathname;
+      const guestUrl = `${baseUrl}?role=guest&loc=${branchId}`;
+
+      setTimeout(() => {
+        window.open(guestUrl, '_blank');
+        this.showToast(`✔️ QR-ссылка открыта! Вы можете распечатать её для наклеек!`, false);
+      }, 1000);
+    } catch(e) {
+      console.error("Error in adminDownloadPrintPDF:", e);
+    }
+  }
+
   adminDownloadPrintPDF() {
     const branchName = this.state.activeBranchName || "WaitPlay";
     this.showToast(`Генерация печатного макета QR-кода для заведения "${branchName}"...`, false);
@@ -11765,7 +11888,143 @@ class WaitPlayApp {
       console.error("Error in cancelAddBranch:", e);
     }
   }
-}
+
+  updateAdminQrCode() {
+    try {
+      const branchId = this.state.activeBranchId || "main";
+      const baseUrl = window.location.origin + window.location.pathname;
+      const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
+      const qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=" + encodeURIComponent(guestUrl);
+
+      const imgEl = document.getElementById("admin-qr-image-element");
+      if (imgEl) {
+        imgEl.src = qrApiUrl;
+      }
+    } catch(e) {
+      console.error("Error updating QR code image:", e);
+    }
+  }
+
+  shareBranchGameLink() {
+    try {
+      const branchId = this.state.activeBranchId || "main";
+      const baseUrl = window.location.origin + window.location.pathname;
+      const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
+      const qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=" + encodeURIComponent(guestUrl);
+
+      if (navigator.share) {
+        navigator.share({
+          title: "WaitPlay — Игры для гостей",
+          text: "Привет! Переходи по ссылке или сканируй QR-код, чтобы играть в локации!",
+          url: guestUrl
+        }).catch(err => {
+          this.openShareQrModal(guestUrl, qrApiUrl);
+        });
+      } else {
+        this.openShareQrModal(guestUrl, qrApiUrl);
+      }
+    } catch(e) {
+      console.error("Error in shareBranchGameLink:", e);
+    }
+  }
+
+  openShareQrModal(guestUrl, qrApiUrl) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(guestUrl).catch(() => {});
+    }
+
+    let modal = document.getElementById("share-qr-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "share-qr-modal";
+      modal.className = "modal-overlay";
+      document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+      <div class="modal-content" style="text-align: center; max-width: 320px; background: #110e1f; border: 1px solid var(--border-light); border-radius: 24px; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.8);">
+        <div style="font-size: 20px; font-weight: 800; color: var(--gold); margin-bottom: 6px;">📱 Вход для гостей</div>
+        <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">Наведите камеру 2-го телефона на этот QR-код!</p>
+        
+        <div style="background: #fff; padding: 15px; border-radius: 20px; display: inline-block; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+          <img src="${qrApiUrl}" alt="Real QR Code" style="width: 200px; height: 200px; display: block; border-radius: 8px;">
+          <div style="font-size: 10px; font-weight: 800; color: #000; margin-top: 8px; text-transform: uppercase;">WAITPLAY GUEST</div>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <input type="text" readonly value="${guestUrl}" id="share-modal-url-input" style="width: 100%; font-size: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-light); color: #fff; padding: 8px; border-radius: 8px; text-align: center; box-sizing: border-box; font-family: inherit;">
+          <button class="btn btn-primary" onclick="app.copyShareUrlFromInput()" style="margin-top: 6px; width: 100%; padding: 8px; font-size: 11px; font-weight: 700;">📋 Скопировать ссылку</button>
+        </div>
+
+        <button class="btn btn-secondary" style="width: 100%; padding: 12px; font-size: 12px; font-weight: 700;" onclick="document.getElementById('share-qr-modal').classList.remove('active')">Закрыть окно ✖</button>
+      </div>
+    `;
+
+    modal.style.display = "flex";
+    modal.classList.add("active");
+  }
+
+  copyShareUrlFromInput() {
+    const input = document.getElementById("share-modal-url-input");
+    if (input) {
+      input.select();
+      input.setSelectionRange(0, 99999);
+      try {
+        navigator.clipboard.writeText(input.value);
+      } catch(e) {
+        document.execCommand("copy");
+      }
+      this.showToast("✔️ Ссылка скопирована в буфер обмена!", false);
+    }
+  }
+
+  adminDownloadPrintPDF() {
+    try {
+      const branchName = this.state.activeBranchName || "WaitPlay";
+      const branchId = this.state.activeBranchId || "main";
+      const baseUrl = window.location.origin + window.location.pathname;
+      const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
+      const qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&data=" + encodeURIComponent(guestUrl);
+
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>QR-код Наклейка - ${branchName}</title>
+            <style>
+              body { font-family: sans-serif; text-align: center; padding: 40px; background: #fff; color: #000; }
+              .card { border: 4px solid #000; border-radius: 24px; padding: 30px; display: inline-block; max-width: 350px; }
+              h1 { margin: 0 0 10px 0; font-size: 24px; }
+              p { font-size: 14px; margin-bottom: 20px; color: #444; }
+              img { width: 260px; height: 260px; }
+              .footer { margin-top: 15px; font-weight: bold; font-size: 12px; letter-spacing: 1px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>${branchName}</h1>
+              <p>Отсканируйте QR-код для игры!</p>
+              <img src="${qrApiUrl}" alt="QR Code">
+              <div class="footer">WAITPLAY GUEST</div>
+            </div>
+            <script>
+              window.onload = function() { window.print(); };
+            </script>
+          </body>
+          </html>
+        `);
+        printWindow.document.close();
+      } else {
+        window.open(qrApiUrl, "_blank");
+      }
+    } catch(e) {
+      console.error("Error in adminDownloadPrintPDF:", e);
+    }
+  }
+
+  }
 
 // Instantiate
 const app = new WaitPlayApp();
