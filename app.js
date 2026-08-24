@@ -11915,7 +11915,7 @@ class WaitPlayApp {
       if (navigator.share) {
         navigator.share({
           title: "WaitPlay — Игры для гостей",
-          text: "Привет! Переходи по ссылке или сканируй QR-код, чтобы играть в локации!",
+          text: "Привет! Переходи по ссылке на игровое пространство, чтобы играть!",
           url: guestUrl
         }).catch(err => {
           this.openShareQrModal(guestUrl, qrApiUrl);
@@ -11974,7 +11974,7 @@ class WaitPlayApp {
       } catch(e) {
         document.execCommand("copy");
       }
-      this.showToast("✔️ Ссылка скопирована в буфер обмена!", false);
+      this.showToast("✔️ Ссылка на локацию скопирована в буфер обмена!", false);
     }
   }
 
