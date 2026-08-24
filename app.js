@@ -359,6 +359,16 @@ class WaitPlayApp {
       if (isGuestUrl) {
         this.state.isVisitorMode = true;
         
+        // Hide Admin frame completely, show Visitor frame for Guest Phone!
+        const allFrames = document.querySelectorAll('.phone-frame');
+        allFrames.forEach(f => {
+          if (f.id === 'visitor-frame') {
+            f.style.display = 'block';
+          } else {
+            f.style.display = 'none';
+          }
+        });
+
         if (this.state.maxVenuePlayers === 0) {
           this.state.visitorActiveView = 'locked';
           this.setVisitorViewPanel('locked');
@@ -369,12 +379,16 @@ class WaitPlayApp {
           this.initVisitorLobby();
           this.showToast("🎮 Добро пожаловать в игровое пространство!", false);
         }
-
-        const adminContainer = document.getElementById('admin-container');
-        const visitorContainer = document.getElementById('visitor-container');
-        if (adminContainer) adminContainer.style.display = 'none';
-        if (visitorContainer) visitorContainer.style.display = 'block';
       } else {
+        const allFrames = document.querySelectorAll('.phone-frame');
+        allFrames.forEach(f => {
+          if (f.id === 'visitor-frame') {
+            f.style.display = 'none';
+          } else {
+            f.style.display = 'block';
+          }
+        });
+
         this.updateAdminView();
         this.updateVisitorView();
       }
