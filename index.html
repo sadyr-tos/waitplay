@@ -7,8 +7,8 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <meta name="theme-color" content="#0b0a13">
-  <link rel="stylesheet" href="style.css?v=20.0.0">
-  <script src="app.js?v=20.0.0"></script>
+  <link rel="stylesheet" href="style.css?v=23.0.0">
+  <script src="app.js?v=23.0.0"></script>
   <script>
     // Force unregister any stale service workers & purge CacheStorage
     if ('serviceWorker' in navigator) {
@@ -1155,9 +1155,6 @@
             <div class="logo-icon">W</div>
             <div class="logo-text" id="visitor-venue-title">WaitPlay</div>
           </div>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <button id="btn-visitor-disconnect" class="debug-btn-mini" style="display:none; padding:2px 6px; font-size:9px; border-color:rgba(239, 68, 68, 0.4); color:var(--error); margin:0;" onclick="app.visitorDisconnect()">❌ Выйти</button>
-          </div>
         </header>
 
         <!-- VIEW 10: VISITOR MAINTENANCE PANEL -->
@@ -1180,8 +1177,8 @@
             <p style="font-size: 12px; color: var(--text-muted); max-width: 250px;">
               Пожалуйста, отсканируйте QR-код на локации, чтобы подключиться к игре.
             </p>
-            <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--border-light); padding: 12px; border-radius: 12px; width: 100%; font-size: 11px; color: var(--text-muted);">
-              Нажмите кнопку <strong>«Протестировать как гость»</strong> на панели администратора слева, чтобы симулировать сканирование столика №4.
+            <div style="background: rgba(139, 92, 246, 0.06); border: 1px solid var(--border-glow); padding: 14px; border-radius: 14px; width: 100%; font-size: 11px; color: #fff; text-align: center; box-sizing: border-box;">
+              👋 <strong>Вы вышли из локации.</strong><br><span style="font-size: 10px; color: var(--text-muted);">Вы можете закрыть эту вкладку в браузере или отсканировать новый QR-код.</span>
             </div>
           </div>
         </div>
@@ -1704,6 +1701,24 @@
             <option value="5">5 человек</option>
             <option value="2">2 человека</option>
             <option value="0">0 человек (Заблокировать вход всем 🔒)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">🤖 Автодополнение Ботами:</label>
+          <select id="settings-bot-mode" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
+            <option value="enabled" selected>🤖 Включить ботов (автодополнение комнат)</option>
+            <option value="disabled">🚫 Отключить ботов (только живые люди)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
+          <label style="font-size: 9px; display:block; margin-bottom:3px;">🎯 Уровень интеллекта Ботов:</label>
+          <select id="settings-bot-difficulty" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
+            <option value="easy">👶 Легкий (Для детей и веселья)</option>
+            <option value="medium" selected>🎯 Средний (Баланс - дефолт)</option>
+            <option value="hard">🔥 Сложный (Опытные боты)</option>
+            <option value="expert">👑 Эксперт (Максимальный интеллект / Гроссмейстер)</option>
           </select>
         </div>
 
