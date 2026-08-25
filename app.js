@@ -346,6 +346,8 @@ class WaitPlayApp {
       if (isGuestUrl) {
         this.state.isVisitorMode = true;
         this.state.email = null; // Clear admin email for guest context!
+        const locParam = urlParams.get('loc') || urlParams.get('branch') || 'main';
+        this.state.visitorConnectedBranchId = locParam;
         this.initDOM();
         
         // Hide Admin frame completely, show Visitor frame for Guest Phone!
@@ -5806,6 +5808,16 @@ class WaitPlayApp {
     }
   }
 
+  getVisitorAnimalAvatar() {
+    if (!this.state.visitorAnimalAvatar) {
+      const avatars = ['🐼 Панда', '🐺 Волк', '🦁 Лев', '🦊 Лиса', '🐻 Медведь', '🐯 Тигр'];
+      const randomIndex = Math.floor(Math.random() * avatars.length);
+      this.state.visitorAnimalAvatar = avatars[randomIndex];
+      this.saveState();
+    }
+    return this.state.visitorAnimalAvatar;
+  }
+
   getVisitorConnectedBranch() {
     if (!this.state.visitorConnectedBranchId) return null;
     
@@ -5817,7 +5829,7 @@ class WaitPlayApp {
       }
     }
     
-    if (this.state.activeBranchId === this.state.visitorConnectedBranchId) {
+    if (!this.state.visitorConnectedBranchId || this.state.activeBranchId === this.state.visitorConnectedBranchId || this.state.visitorConnectedBranchId === 'main') {
       return {
         id: this.state.activeBranchId,
         name: this.state.activeBranchName,
