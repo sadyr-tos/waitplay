@@ -348,6 +348,17 @@ class WaitPlayApp {
         this.state.email = null; // Clear admin email for guest context!
         const locParam = urlParams.get('loc') || urlParams.get('branch') || 'main';
         this.state.visitorConnectedBranchId = locParam;
+
+        // Sync admin settings passed inside QR Code / Link URL params!
+        if (urlParams.has('botMode')) {
+          this.state.botMode = urlParams.get('botMode');
+        }
+        if (urlParams.has('botDiff')) {
+          this.state.botDifficulty = urlParams.get('botDiff');
+        }
+        if (urlParams.has('max')) {
+          this.state.maxVenuePlayers = parseInt(urlParams.get('max')) || 15;
+        }
         this.initDOM();
         
         // Hide Admin frame completely, show Visitor frame for Guest Phone!
@@ -10567,7 +10578,10 @@ class WaitPlayApp {
     try {
       const branchId = this.state.activeBranchId || "main";
       const baseUrl = window.location.origin + window.location.pathname;
-      const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
+      const botMode = this.state.botMode || 'enabled';
+      const botDiff = this.state.botDifficulty || 'medium';
+      const maxVenue = this.state.maxVenuePlayers !== undefined ? this.state.maxVenuePlayers : 15;
+      const guestUrl = baseUrl + "?role=guest&loc=" + branchId + "&botMode=" + botMode + "&botDiff=" + botDiff + "&max=" + maxVenue;
 
       const boxEl = document.getElementById("admin-qr-code-box");
       if (boxEl) {
@@ -10582,7 +10596,10 @@ class WaitPlayApp {
     try {
       const branchId = this.state.activeBranchId || "main";
       const baseUrl = window.location.origin + window.location.pathname;
-      const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
+      const botMode = this.state.botMode || 'enabled';
+      const botDiff = this.state.botDifficulty || 'medium';
+      const maxVenue = this.state.maxVenuePlayers !== undefined ? this.state.maxVenuePlayers : 15;
+      const guestUrl = baseUrl + "?role=guest&loc=" + branchId + "&botMode=" + botMode + "&botDiff=" + botDiff + "&max=" + maxVenue;
 
       if (navigator.share) {
         navigator.share({
