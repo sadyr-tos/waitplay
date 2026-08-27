@@ -10675,7 +10675,7 @@ class WaitPlayApp {
 
         <button class="btn btn-secondary" style="width: 100%; padding: 10px; font-size: 11px; font-weight: 700; margin-bottom: 8px;" onclick="app.adminDownloadPrintPDF()">📥 Печать наклейки QR (PDF)</button>
 
-        <button class="btn btn-secondary" style="width: 100%; padding: 12px; font-size: 12px; font-weight: 700;" onclick="document.getElementById('share-qr-modal').classList.remove('active')">Закрыть окно ✖</button>
+        <button class="btn btn-secondary" style="width: 100%; padding: 12px; font-size: 12px; font-weight: 700;" onclick="document.getElementById('share-qr-modal').style.display='none'; document.getElementById('share-qr-modal').classList.remove('active');">Закрыть окно ✖</button>
       </div>
     `;
 

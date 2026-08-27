@@ -7,8 +7,8 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <meta name="theme-color" content="#0b0a13">
-  <link rel="stylesheet" href="style.css?v=28.0.0">
-  <script src="app.js?v=28.0.0"></script>
+  <link rel="stylesheet" href="style.css?v=29.0.0">
+  <script src="app.js?v=29.0.0"></script>
   <script>
     // Force unregister any stale service workers & purge CacheStorage
     if ('serviceWorker' in navigator) {
@@ -1704,32 +1704,7 @@
           </select>
         </div>
 
-        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
-          <label style="font-size: 9px; display:block; margin-bottom:3px;">🤖 Автодополнение Ботами:</label>
-          <select id="settings-bot-mode" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
-            <option value="enabled" selected>🤖 Включить ботов (автодополнение комнат)</option>
-            <option value="disabled">🚫 Отключить ботов (только живые люди)</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
-          <label style="font-size: 9px; display:block; margin-bottom:3px;">🎯 Уровень интеллекта Ботов:</label>
-          <select id="settings-bot-difficulty" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
-            <option value="easy">👶 Легкий (Для детей и веселья)</option>
-            <option value="medium" selected>🎯 Средний (Баланс - дефолт)</option>
-            <option value="hard">🔥 Сложный (Опытные боты)</option>
-            <option value="expert">👑 Эксперт (Максимальный интеллект / Гроссмейстер)</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-top: 8px; margin-bottom: 0;">
-          <label style="font-size: 9px; display:block; margin-bottom:3px;">При ничьей в играх:</label>
-          <select id="settings-quiz-tie" onchange="app.saveBranchLimits()" style="width: 100%; background: #1a1631; border: 1px solid var(--border-light); color: #fff; font-size: 11px; border-radius: 6px; padding: 6px; cursor: pointer; font-family: inherit; outline:none;">
-            <option value="deny" selected>Никому не выдавать приз при ничьей (дефолт)</option>
-            <option value="give">Выдавать призы игрокам с одинаковыми очками</option>
-          </select>
-        </div>
-      </div>
+        
 
       <button class="btn btn-secondary" style="padding: 12px; font-size: 12px; font-weight:700; margin: 0; width:100%;" onclick="app.closeVenueGameLimitsModal()">
         Закрыть настройки ✖
