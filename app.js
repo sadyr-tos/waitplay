@@ -3446,6 +3446,7 @@ class WaitPlayApp {
     this.recalculateDistances();
     this.renderCreatorClientsList();
     this.updateAdminPanelSwitcherDropdown();
+    if (finalViewId === 'dashboard') this.updateAdminView();
     this.renderRegQuickAccounts();
     this.renderAdminAccountSwitcher();
     this.renderAdminGamesGrid();
@@ -5827,6 +5828,31 @@ class WaitPlayApp {
       this.saveState();
     }
     return this.state.visitorAnimalAvatar;
+  }
+
+  getRealHumanRoomPlayers(roomId) {
+    this.state.roomRegistry = this.state.roomRegistry || {};
+    const now = Date.now();
+    const myId = this.state.visitorAnimalAvatar || this.getVisitorAnimalAvatar();
+    
+    if (!this.state.roomRegistry[roomId]) {
+      this.state.roomRegistry[roomId] = [];
+    }
+    
+    // Update self heartbeat in localStorage for P2P cross-tab / cross-device sync
+    let list = this.state.roomRegistry[roomId];
+    const myIndex = list.findIndex(p => p.id === myId);
+    if (myIndex !== -1) {
+      list[myIndex].lastSeen = now;
+    } else {
+      list.push({ id: myId, avatar: myId, lastSeen: now });
+    }
+    
+    // Clean stale players inactive > 10s
+    list = list.filter(p => now - p.lastSeen < 10000);
+    this.state.roomRegistry[roomId] = list;
+    this.saveState();
+    return list;
   }
 
   getVisitorConnectedBranch() {
