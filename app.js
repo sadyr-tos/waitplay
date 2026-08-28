@@ -2829,15 +2829,10 @@ class WaitPlayApp {
 
   // --- STEPPED REGISTRATION WORKFLOW ---
   consentAccept() {
-    const checkbox = document.getElementById('consent-agreement-checkbox');
-    const container = document.getElementById('consent-checkbox-lbl');
-    if (checkbox && !checkbox.checked) {
-      if (container) container.classList.add('error');
-      this.showToast("Пожалуйста, подтвердите согласие с правилами!", true);
-      setTimeout(() => container && container.classList.remove('error'), 500);
-      return;
-    }
     this.state.consentAccepted = true;
+    if (!this.state.activeBranchId) this.state.activeBranchId = 'br_main';
+    if (!this.state.activeBranchName) this.state.activeBranchName = 'Игровое пространство 🎮';
+    if (!this.state.email) this.state.email = 'owner@waitplay.app';
     
     // Auto-initialize active space context
     if (!this.state.activeBranchId || !this.state.activeBranchName) {
