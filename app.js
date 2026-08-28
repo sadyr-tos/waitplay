@@ -6243,13 +6243,12 @@ class WaitPlayApp {
   }
 
   initTTFTournament() {
-    // ZERO BOTS! Pure 1-on-1 match between Player 1 (🐼 Панда - ❌) and Player 2 (🐺 Волк - ⭕)
-    const p1 = { name: "🐼 Панда (❌)", avatar: "🐼", isUser: true };
-    const p2 = { name: "🐺 Волк (⭕)", avatar: "🐺", isUser: false };
+    const p1 = { name: "Панда", avatar: "🐼", isUser: true };
+    const p2 = { name: "Волк", avatar: "🐺", isUser: false };
     
     this.state.tttTournament = {
       size: 2,
-      round: 1,
+      round: 0,
       bracket: {
         round1: [{ p1: p1, p2: p2, winner: null }]
       },
