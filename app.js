@@ -2830,23 +2830,29 @@ class WaitPlayApp {
   // --- STEPPED REGISTRATION WORKFLOW ---
   consentAccept() {
     this.state.consentAccepted = true;
-    if (!this.state.activeBranchId) this.state.activeBranchId = 'br_main';
-    if (!this.state.activeBranchName) this.state.activeBranchName = 'Игровое пространство 🎮';
-    if (!this.state.email) this.state.email = 'owner@waitplay.app';
-    
-    // Auto-initialize active space context
-    if (!this.state.activeBranchId || !this.state.activeBranchName) {
-      this.state.activeBranchId = 'br_main';
-      this.state.activeBranchName = 'Игровое пространство 🎮';
-    }
-    if (!this.state.email) {
-      this.state.email = 'owner@waitplay.app';
+    this.state.activeBranchId = 'br_main';
+    this.state.activeBranchName = 'Игровое пространство 🎮';
+    this.state.email = 'owner@waitplay.app';
+    this.state.subscription = 'pro';
+    this.saveState();
+
+    this.showToast("Добро пожаловать на Рабочий стол WaitPlay! 🚀", false);
+
+    // Force hide welcome choice panel and force show admin dashboard panel
+    const welcomePanel = document.getElementById('admin-welcome-choice-panel');
+    if (welcomePanel) {
+      welcomePanel.classList.remove('active');
+      welcomePanel.style.display = 'none';
     }
 
-    this.saveState();
-    this.showToast("Добро пожаловать на Рабочий стол WaitPlay! 🚀", false);
-    this.setAdminPanelActiveView('dashboard');
-    this.updateAdminView();
+    const dashPanel = document.getElementById('admin-dashboard-panel');
+    if (dashPanel) {
+      dashPanel.classList.add('active');
+      dashPanel.style.display = 'flex';
+    }
+
+    this.renderAdminGamesGrid();
+    this.updateAdminQrCode();
   }
 
   regSendEmailCode() {
