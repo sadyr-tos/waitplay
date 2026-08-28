@@ -6243,57 +6243,26 @@ class WaitPlayApp {
   }
 
   initTTFTournament() {
-    const branch = this.getVisitorConnectedBranch();
-    const size = branch && branch.tttTournamentSize ? branch.tttTournamentSize : this.state.tttTournamentSize;
-    const diff = branch && branch.tttDifficulty ? branch.tttDifficulty : this.state.tttDifficulty;
-    
-    const botPoolNames = ["Панда", "Лиса", "Медведь", "Тигр", "Лев", "Зайка", "Обезьянка", "Коала", "Лягушка", "Котёнок", "Щенок", "Цыплёнок", "Барсук", "Волк", "Кабан", "Ёжик"];
-    const botPoolEmojis = ["🐼", "🦊", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔", "🦡", "🐺", "🐗", "🦔"];
-    
-    const shuffled = [];
-    for (let i = 0; i < botPoolNames.length; i++) {
-      shuffled.push({ name: botPoolNames[i], avatar: botPoolEmojis[i] });
-    }
-    shuffled.sort(() => Math.random() - 0.5);
-    
-    const countNeeded = size - 1;
-    const tournamentBots = shuffled.slice(0, countNeeded);
-    
-    const round1Matches = [];
-    round1Matches.push({ p1: { name: "Вы", avatar: "👨‍💻", isUser: true }, p2: tournamentBots[0], winner: null });
-    
-    for (let i = 1; i < size / 2; i++) {
-      round1Matches.push({ p1: tournamentBots[i * 2 - 1], p2: tournamentBots[i * 2], winner: null });
-    }
-    
-    const roundsCount = Math.log2(size);
-    const bracket = {
-      round1: round1Matches
-    };
-    for (let r = 2; r <= roundsCount; r++) {
-      const matchCount = size / Math.pow(2, r);
-      bracket[`round${r}`] = [];
-      for (let m = 0; m < matchCount; m++) {
-        bracket[`round${r}`].push({ p1: null, p2: null, winner: null });
-      }
-    }
+    // ZERO BOTS! Pure 1-on-1 match between Player 1 (🐼 Панда - ❌) and Player 2 (🐺 Волк - ⭕)
+    const p1 = { name: "🐼 Панда (❌)", avatar: "🐼", isUser: true };
+    const p2 = { name: "🐺 Волк (⭕)", avatar: "🐺", isUser: false };
     
     this.state.tttTournament = {
-      size: size,
-      round: 0,
-      bracket: bracket,
-      currentMatch: null,
+      size: 2,
+      round: 1,
+      bracket: {
+        round1: [{ p1: p1, p2: p2, winner: null }]
+      },
+      currentMatch: { p1: p1, p2: p2 },
       board: Array(9).fill(null),
       playerTurn: true,
-      matchStatus: 'bracket',
-      difficulty: diff,
+      matchStatus: "playing",
+      difficulty: "live",
       isUserActive: true
     };
     
-    this.simulateBotMatchesForCurrentRound();
     this.renderActiveGameQuestion();
   }
-
   simulateBotMatchesForCurrentRound() {
     const t = this.state.tttTournament;
     if (!t) return;
