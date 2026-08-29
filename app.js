@@ -721,6 +721,9 @@ class WaitPlayApp {
         creatorFullscreen: this.state.creatorFullscreen,
         tttDifficulty: this.state.tttDifficulty,
         tttTournamentSize: this.state.tttTournamentSize,
+        limitGames: this.state.limitGames,
+        limitHours: this.state.limitHours,
+        maxVenuePlayers: this.state.maxVenuePlayers,
         quizTieWinnerBehavior: this.state.quizTieWinnerBehavior,
         crosswordDifficulty: this.state.crosswordDifficulty,
         crosswordTimeLimit: this.state.crosswordTimeLimit,
@@ -3740,6 +3743,45 @@ class WaitPlayApp {
       `;
       container.appendChild(card);
     });
+  }
+
+  changeGameMinPlayers(id, val) {
+    try {
+      const num = parseInt(val) || 2;
+      const game = (this.state.games || []).find(g => g.id === id);
+      if (game) {
+        game.minPlayers = Math.max(2, Math.min(num, game.maxPlayers));
+        if (id === 4) {
+          this.state.tttTournamentSize = game.minPlayers;
+        }
+        this.saveState();
+        this.showToast(`Минимум игроков для "${game.name}": ${game.minPlayers} чел.`, false);
+      }
+    } catch(e) {
+      console.error("Error in changeGameMinPlayers:", e);
+    }
+  }
+
+  saveBranchLimits() {
+    try {
+      const gamesSelect = document.getElementById('settings-limit-games');
+      if (gamesSelect) {
+        this.state.limitGames = parseInt(gamesSelect.value) || 2;
+      }
+      const hoursSelect = document.getElementById('settings-limit-hours');
+      if (hoursSelect) {
+        this.state.limitHours = parseInt(hoursSelect.value) || 3;
+      }
+      const maxSelect = document.getElementById('settings-max-players');
+      if (maxSelect) {
+        this.state.maxVenuePlayers = parseInt(maxSelect.value) || 15;
+      }
+      this.saveState();
+      this.showToast("✔️ Настройки локации сохранены!", false);
+      this.updateAdminQrCode();
+    } catch(e) {
+      console.error("Error in saveBranchLimits:", e);
+    }
   }
 
   toggleGamePublishState(id, checked) {
@@ -10638,24 +10680,19 @@ class WaitPlayApp {
         modal.style.display = 'flex';
         modal.classList.add('active');
         
+        const gamesSelect = document.getElementById('settings-limit-games');
+        if (gamesSelect && this.state.limitGames !== undefined) {
+          gamesSelect.value = String(this.state.limitGames);
+        }
+
+        const hoursSelect = document.getElementById('settings-limit-hours');
+        if (hoursSelect && this.state.limitHours !== undefined) {
+          hoursSelect.value = String(this.state.limitHours);
+        }
+
         const maxPlayersSelect = document.getElementById('settings-max-players');
         if (maxPlayersSelect && this.state.maxVenuePlayers !== undefined) {
           maxPlayersSelect.value = String(this.state.maxVenuePlayers);
-        }
-        
-        const tieSelect = document.getElementById('settings-quiz-tie');
-        if (tieSelect && this.state.quizTieWinnerBehavior) {
-          tieSelect.value = this.state.quizTieWinnerBehavior;
-        }
-
-        const botModeSelect = document.getElementById('settings-bot-mode');
-        if (botModeSelect && this.state.botMode) {
-          botModeSelect.value = this.state.botMode;
-        }
-
-        const botDiffSelect = document.getElementById('settings-bot-difficulty');
-        if (botDiffSelect && this.state.botDifficulty) {
-          botDiffSelect.value = this.state.botDifficulty;
         }
       } else {
         console.error("venue-game-limits-modal not found!");
