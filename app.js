@@ -6242,6 +6242,114 @@ class WaitPlayApp {
     this.renderActiveGameQuestion();
   }
 
+  renderTTFBoard(optionsBox, textLabel) {
+    const t = this.state.tttTournament;
+    if (!t) {
+      this.initTTFTournament();
+      return;
+    }
+
+    if (textLabel) {
+      textLabel.innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:12px; font-weight:800; color:var(--gold); margin-bottom:6px;">🎮 КРЕСТИКИ-НОЛИКИ ❌⭕</div>
+          <div style="display:flex; justify-content:center; align-items:center; gap:12px; font-size:14px; color:#fff; font-weight:700;">
+            <span>🐼 Панда (❌)</span>
+            <span style="color:var(--gold); font-size:11px;">VS</span>
+            <span>🐺 Волк (⭕)</span>
+          </div>
+        </div>
+      `;
+    }
+
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.style.display = 'grid';
+      optionsBox.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      optionsBox.style.gap = '8px';
+      optionsBox.style.maxWidth = '280px';
+      optionsBox.style.margin = '15px auto 0 auto';
+
+      for (let i = 0; i < 9; i++) {
+        const cell = t.board[i];
+        const btn = document.createElement('button');
+        btn.style.cssText = 'height: 75px; font-size: 32px; font-weight: 900; background: #18142c; border: 2px solid var(--border-light); border-radius: 12px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: all 0.15s; margin: 0;';
+        
+        if (cell === 'X') {
+          btn.innerText = '❌';
+          btn.style.borderColor = 'var(--primary)';
+          btn.style.background = 'rgba(139, 92, 246, 0.15)';
+        } else if (cell === 'O') {
+          btn.innerText = '⭕';
+          btn.style.borderColor = 'var(--gold)';
+          btn.style.background = 'rgba(245, 158, 11, 0.15)';
+        } else {
+          btn.innerText = '';
+          btn.onclick = () => this.handleTTFCellClick(i);
+        }
+        optionsBox.appendChild(btn);
+      }
+    }
+  }
+
+  handleTTFCellClick(index) {
+    const t = this.state.tttTournament;
+    if (!t || t.board[index] !== null) return;
+
+    const symbol = t.playerTurn ? 'X' : 'O';
+    t.board[index] = symbol;
+    t.playerTurn = !t.playerTurn;
+
+    this.playAudioTone('click');
+
+    const winner = this.checkTTFWinner(t.board);
+    if (winner) {
+      this.finishTTFMatch(winner);
+    } else if (t.board.every(cell => cell !== null)) {
+      this.finishTTFMatch('draw');
+    } else {
+      this.renderActiveGameQuestion();
+    }
+  }
+
+  checkTTFWinner(board) {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+    for (const [a, b, c] of lines) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return board[a];
+      }
+    }
+    return null;
+  }
+
+  finishTTFMatch(result) {
+    const textLabel = document.getElementById('visitor-game-question-text');
+    const optionsBox = document.getElementById('visitor-game-options-container');
+
+    if (result === 'X') {
+      this.showVisitorToast("🎉 ПОБЕДА! Победил Игрок 🐼 Панда (❌)!", false);
+      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--success); text-align:center;">🎉 ПОБЕДА ❌ (Панда)!</h3>`;
+    } else if (result === 'O') {
+      this.showVisitorToast("🎉 ПОБЕДА! Победил Игрок 🐺 Волк (⭕)!", false);
+      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--gold); text-align:center;">🎉 ПОБЕДА ⭕ (Волк)!</h3>`;
+    } else {
+      this.showVisitorToast("🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!", false);
+      if (textLabel) textLabel.innerHTML = `<h3 style="color:#fff; text-align:center;">🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!</h3>`;
+    }
+
+    if (optionsBox) {
+      optionsBox.innerHTML = `
+        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800;" onclick="app.initTTFTournament()">
+          🔄 Сыграть ещё раунд 🎯
+        </button>
+      `;
+    }
+  }
+
   initTTFTournament() {
     const p1 = { name: "Панда", avatar: "🐼", isUser: true };
     const p2 = { name: "Волк", avatar: "🐺", isUser: false };
