@@ -337,6 +337,151 @@ class WaitPlayApp {
     return preset;
   }
 
+  // ==========================================
+  // --- REAL-TIME LIVE MULTIPLAYER CORRIDOR ---
+  // ==========================================
+  initRealtimeNetwork(venueId) {
+    if (!venueId) venueId = 'loc_main';
+    this.networkVenueId = venueId;
+    this.myPlayerId = this.myPlayerId || ('p_' + Math.random().toString(36).substring(2, 9));
+    
+    // Assign random animal name & avatar for this device if not assigned
+    if (!this.myPlayerProfile) {
+      const names = ["Панда", "Волк", "Лиса", "Лев", "Тигр", "Медведь", "Коала", "Зайка", "Енот", "Барсук"];
+      const avatars = ["🐼", "🐺", "🦊", "🦁", "🐯", "🐻", "🐨", "🐰", "🦝", "🦡"];
+      const rIdx = Math.floor(Math.random() * names.length);
+      this.myPlayerProfile = {
+        id: this.myPlayerId,
+        name: names[rIdx],
+        avatar: avatars[rIdx]
+      };
+    }
+
+    this.livePlayers = this.livePlayers || {};
+    this.livePlayers[this.myPlayerId] = {
+      ...this.myPlayerProfile,
+      lastSeen: Date.now(),
+      gameId: this.state.visitorSelectedGameId || null
+    };
+
+    if (this.mqttClient) {
+      try { this.mqttClient.end(true); } catch(e) {}
+    }
+
+    try {
+      if (typeof mqtt !== 'undefined') {
+        const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+        const topic = `waitplay/corridor/${this.networkVenueId}`;
+        
+        this.mqttClient = mqtt.connect(brokerUrl, {
+          clientId: `wp_${this.myPlayerId}_${Math.random().toString(16).substring(2, 6)}`,
+          clean: true,
+          connectTimeout: 4000,
+          reconnectPeriod: 2000
+        });
+
+        this.mqttClient.on('connect', () => {
+          console.log("Connected to Realtime Corridor:", topic);
+          this.mqttClient.subscribe(topic, { qos: 0 });
+          this.broadcastNetworkPresence();
+        });
+
+        this.mqttClient.on('message', (t, payload) => {
+          try {
+            const data = JSON.parse(payload.toString());
+            this.handleNetworkMessage(data);
+          } catch(e) {
+            console.error("Error parsing realtime message:", e);
+          }
+        });
+      }
+    } catch(e) {
+      console.warn("MQTT connection error:", e);
+    }
+
+    // Heartbeat presence every 3 seconds
+    if (this.networkHeartbeat) clearInterval(this.networkHeartbeat);
+    this.networkHeartbeat = setInterval(() => {
+      this.broadcastNetworkPresence();
+      this.cleanStaleNetworkPlayers();
+    }, 3000);
+  }
+
+  broadcastNetworkPresence() {
+    if (!this.mqttClient || !this.mqttClient.connected) return;
+    const msg = {
+      type: 'presence',
+      senderId: this.myPlayerId,
+      profile: this.myPlayerProfile,
+      gameId: this.state.visitorSelectedGameId || null,
+      timestamp: Date.now()
+    };
+    try {
+      this.mqttClient.publish(`waitplay/corridor/${this.networkVenueId}`, JSON.stringify(msg));
+    } catch(e) {}
+  }
+
+  sendNetworkMessage(payload) {
+    if (!this.mqttClient || !this.mqttClient.connected) return;
+    const msg = {
+      ...payload,
+      senderId: this.myPlayerId,
+      profile: this.myPlayerProfile,
+      venueId: this.networkVenueId,
+      timestamp: Date.now()
+    };
+    try {
+      this.mqttClient.publish(`waitplay/corridor/${this.networkVenueId}`, JSON.stringify(msg));
+    } catch(e) {
+      console.error("Error sending network message:", e);
+    }
+  }
+
+  handleNetworkMessage(data) {
+    if (!data || data.senderId === this.myPlayerId) return; // ignore own echo
+
+    if (data.type === 'presence') {
+      if (data.senderId && data.profile) {
+        this.livePlayers[data.senderId] = {
+          ...data.profile,
+          lastSeen: Date.now(),
+          gameId: data.gameId || null
+        };
+        this.updateLivePlayersCorridorUI();
+      }
+    } else if (data.type === 'game_move') {
+      if (data.gameId === 4) {
+        this.handleRemoteTTFMove(data);
+      }
+    } else if (data.type === 'game_restart') {
+      if (data.gameId === 4) {
+        this.handleRemoteTTFRestart(data);
+      }
+    }
+  }
+
+  cleanStaleNetworkPlayers() {
+    const now = Date.now();
+    let changed = false;
+    for (const [id, player] of Object.entries(this.livePlayers || {})) {
+      if (id !== this.myPlayerId && now - player.lastSeen > 8000) {
+        delete this.livePlayers[id];
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.updateLivePlayersCorridorUI();
+    }
+  }
+
+  updateLivePlayersCorridorUI() {
+    const count = Object.keys(this.livePlayers || {}).length;
+    const countEl = document.getElementById('visitor-lobby-live-count');
+    if (countEl) {
+      countEl.innerText = `👥 В Лобби: ${count} чел. онлайн`;
+    }
+  }
+
   init() {
     try {
       // Check if URL query contains guest mode params (?role=guest, ?guest=1, ?loc=...) FIRST!
@@ -348,6 +493,7 @@ class WaitPlayApp {
         this.state.email = null; // Clear admin email for guest context!
         const locParam = urlParams.get('loc') || urlParams.get('branch') || 'main';
         this.state.visitorConnectedBranchId = locParam;
+      this.initRealtimeNetwork(locParam);
 
         // Sync admin settings passed inside QR Code / Link URL params!
         if (urlParams.has('botMode')) {
@@ -2856,6 +3002,7 @@ class WaitPlayApp {
 
     this.renderAdminGamesGrid();
     this.updateAdminQrCode();
+    this.initRealtimeNetwork(this.state.activeBranchId || 'loc_main');
   }
 
   regSendEmailCode() {
@@ -6284,6 +6431,45 @@ class WaitPlayApp {
     this.renderActiveGameQuestion();
   }
 
+  initTTFTournament() {
+    // Determine active players in this game room
+    const liveInRoom = Object.values(this.livePlayers || {}).filter(p => p.gameId === 4 || !p.gameId);
+    
+    // Default to Panda vs Wolf for 2 players
+    let mySymbol = 'X';
+    let oppSymbol = 'O';
+    let myName = this.myPlayerProfile ? `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}` : '🐼 Панда';
+    let oppName = '🐺 Волк';
+
+    // If there is another live human player in the corridor, pair with them!
+    const otherPlayer = Object.values(this.livePlayers || {}).find(p => p.id !== this.myPlayerId);
+    if (otherPlayer) {
+      // Deterministic symbol assignment: lower ID is X, higher ID is O
+      if (this.myPlayerId > otherPlayer.id) {
+        mySymbol = 'O';
+        oppSymbol = 'X';
+      } else {
+        mySymbol = 'X';
+        oppSymbol = 'O';
+      }
+      oppName = `${otherPlayer.avatar} ${otherPlayer.name}`;
+    }
+
+    this.state.tttTournament = {
+      size: 2,
+      mySymbol: mySymbol,
+      oppSymbol: oppSymbol,
+      myName: myName,
+      oppName: oppName,
+      board: Array(9).fill(null),
+      currentTurn: 'X',
+      status: 'playing',
+      winner: null
+    };
+
+    this.renderActiveGameQuestion();
+  }
+
   renderTTFBoard(optionsBox, textLabel) {
     const t = this.state.tttTournament;
     if (!t) {
@@ -6291,15 +6477,21 @@ class WaitPlayApp {
       return;
     }
 
+    const isMyTurn = (t.currentTurn === t.mySymbol);
+    const turnIndicator = isMyTurn
+      ? `<span style="color:var(--success); font-weight:800;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`
+      : `<span style="color:var(--gold); font-weight:700;">⏳ Ход соперника (${t.oppName})...</span>`;
+
     if (textLabel) {
       textLabel.innerHTML = `
         <div style="text-align:center;">
-          <div style="font-size:12px; font-weight:800; color:var(--gold); margin-bottom:6px;">🎮 КРЕСТИКИ-НОЛИКИ ❌⭕</div>
-          <div style="display:flex; justify-content:center; align-items:center; gap:12px; font-size:14px; color:#fff; font-weight:700;">
-            <span>🐼 Панда (❌)</span>
-            <span style="color:var(--gold); font-size:11px;">VS</span>
-            <span>🐺 Волк (⭕)</span>
+          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:4px;">🎮 КРЕСТИКИ-НОЛИКИ (ЖИВОЙ МАТЧ)</div>
+          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:6px;">
+            <span>${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="color:var(--gold); font-size:10px;">VS</span>
+            <span>${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
           </div>
+          <div style="font-size:12px; margin-top:4px;">${turnIndicator}</div>
         </div>
       `;
     }
@@ -6327,70 +6519,103 @@ class WaitPlayApp {
           btn.style.background = 'rgba(245, 158, 11, 0.15)';
         } else {
           btn.innerText = '';
-          btn.onclick = () => this.handleTTFCellClick(i);
+          if (isMyTurn && !t.winner) {
+            btn.onclick = () => this.handleLiveTTFCellClick(i);
+          } else {
+            btn.style.cursor = 'not-allowed';
+            btn.style.opacity = '0.7';
+          }
         }
         optionsBox.appendChild(btn);
       }
     }
   }
 
-  handleTTFCellClick(index) {
+  handleLiveTTFCellClick(index) {
     const t = this.state.tttTournament;
-    if (!t || t.board[index] !== null) return;
+    if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner) return;
 
-    const symbol = t.playerTurn ? 'X' : 'O';
-    t.board[index] = symbol;
-    t.playerTurn = !t.playerTurn;
-
+    // Apply move locally
+    t.board[index] = t.mySymbol;
+    t.currentTurn = (t.mySymbol === 'X') ? 'O' : 'X';
     this.playAudioTone('click');
+
+    // Broadcast move to other live phone instantly!
+    this.sendNetworkMessage({
+      type: 'game_move',
+      gameId: 4,
+      cellIndex: index,
+      symbol: t.mySymbol,
+      nextTurn: t.currentTurn
+    });
 
     const winner = this.checkTTFWinner(t.board);
     if (winner) {
+      t.winner = winner;
       this.finishTTFMatch(winner);
     } else if (t.board.every(cell => cell !== null)) {
+      t.winner = 'draw';
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
     }
   }
 
-  checkTTFWinner(board) {
-    const lines = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8],
-      [0, 3, 6], [1, 4, 7], [2, 5, 8],
-      [0, 4, 8], [2, 4, 6]
-    ];
-    for (const [a, b, c] of lines) {
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return board[a];
-      }
+  handleRemoteTTFMove(data) {
+    const t = this.state.tttTournament;
+    if (!t || data.gameId !== 4) return;
+
+    t.board[data.cellIndex] = data.symbol;
+    t.currentTurn = data.nextTurn;
+    this.playAudioTone('click');
+
+    const winner = this.checkTTFWinner(t.board);
+    if (winner) {
+      t.winner = winner;
+      this.finishTTFMatch(winner);
+    } else if (t.board.every(cell => cell !== null)) {
+      t.winner = 'draw';
+      this.finishTTFMatch('draw');
+    } else {
+      this.renderActiveGameQuestion();
     }
-    return null;
   }
 
+  handleRemoteTTFRestart(data) {
+    if (data.gameId === 4) {
+      this.initTTFTournament();
+    }
+  }
   finishTTFMatch(result) {
     const textLabel = document.getElementById('visitor-game-question-text');
     const optionsBox = document.getElementById('visitor-game-options-container');
+    const t = this.state.tttTournament;
 
-    if (result === 'X') {
-      this.showVisitorToast("🎉 ПОБЕДА! Победил Игрок 🐼 Панда (❌)!", false);
-      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--success); text-align:center;">🎉 ПОБЕДА ❌ (Панда)!</h3>`;
-    } else if (result === 'O') {
-      this.showVisitorToast("🎉 ПОБЕДА! Победил Игрок 🐺 Волк (⭕)!", false);
-      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--gold); text-align:center;">🎉 ПОБЕДА ⭕ (Волк)!</h3>`;
-    } else {
+    if (result === 'draw') {
       this.showVisitorToast("🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!", false);
       if (textLabel) textLabel.innerHTML = `<h3 style="color:#fff; text-align:center;">🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!</h3>`;
+    } else if (t && result === t.mySymbol) {
+      this.showVisitorToast("🎉 ПОБЕДА! ВЫ ВЫИГРАЛИ МАТЧ!", false);
+      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--success); text-align:center;">🎉 ПОБЕДА! ВЫ ВЫИГРАЛИ! 🏆</h3>`;
+    } else {
+      this.showVisitorToast("👏 МАТЧ ЗАВЕРШЕН! Победил соперник.", false);
+      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--gold); text-align:center;">👏 Победил соперник (${t ? t.oppName : ''})</h3>`;
     }
 
     if (optionsBox) {
       optionsBox.innerHTML = `
-        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800;" onclick="app.initTTFTournament()">
+        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800;" onclick="app.requestLiveTTFRestart()">
           🔄 Сыграть ещё раунд 🎯
         </button>
       `;
     }
   }
+
+  requestLiveTTFRestart() {
+    this.sendNetworkMessage({ type: 'game_restart', gameId: 4 });
+    this.initTTFTournament();
+  }
+  
 
   initTTFTournament() {
     const p1 = { name: "Панда", avatar: "🐼", isUser: true };
