@@ -6432,27 +6432,32 @@ class WaitPlayApp {
   }
 
   initTTFTournament() {
-    // Determine active players in this game room
-    const liveInRoom = Object.values(this.livePlayers || {}).filter(p => p.gameId === 4 || !p.gameId);
-    
-    // Default to Panda vs Wolf for 2 players
+    if (!this.myPlayerProfile) {
+      const names = ["Панда", "Волк", "Лиса", "Лев", "Тигр", "Медведь", "Коала", "Зайка"];
+      const avatars = ["🐼", "🐺", "🦊", "🦁", "🐯", "🐻", "🐨", "🐰"];
+      const rIdx = Math.floor(Math.random() * names.length);
+      this.myPlayerId = this.myPlayerId || ('p_' + Math.random().toString(36).substring(2, 9));
+      this.myPlayerProfile = { id: this.myPlayerId, name: names[rIdx], avatar: avatars[rIdx] };
+    }
+
+    // Default: Panda (X) vs Wolf (O)
     let mySymbol = 'X';
     let oppSymbol = 'O';
-    let myName = this.myPlayerProfile ? `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}` : '🐼 Панда';
-    let oppName = '🐺 Волк';
+    let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
+    let oppName = "🐺 Волк (Игрок 2)";
 
-    // If there is another live human player in the corridor, pair with them!
-    const otherPlayer = Object.values(this.livePlayers || {}).find(p => p.id !== this.myPlayerId);
-    if (otherPlayer) {
-      // Deterministic symbol assignment: lower ID is X, higher ID is O
-      if (this.myPlayerId > otherPlayer.id) {
+    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p.id !== this.myPlayerId);
+    if (otherPlayers.length > 0) {
+      const other = otherPlayers[0];
+      oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
+      // Lower ID gets X, higher ID gets O
+      if (this.myPlayerId > other.id) {
         mySymbol = 'O';
         oppSymbol = 'X';
       } else {
         mySymbol = 'X';
         oppSymbol = 'O';
       }
-      oppName = `${otherPlayer.avatar} ${otherPlayer.name}`;
     }
 
     this.state.tttTournament = {
@@ -6467,6 +6472,13 @@ class WaitPlayApp {
       winner: null
     };
 
+    // Broadcast that we entered the TicTacToe room
+    this.sendNetworkMessage({
+      type: 'ttt_join',
+      gameId: 4,
+      profile: this.myPlayerProfile
+    });
+
     this.renderActiveGameQuestion();
   }
 
@@ -6477,21 +6489,23 @@ class WaitPlayApp {
       return;
     }
 
-    const isMyTurn = (t.currentTurn === t.mySymbol);
-    const turnIndicator = isMyTurn
-      ? `<span style="color:var(--success); font-weight:800;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`
-      : `<span style="color:var(--gold); font-weight:700;">⏳ Ход соперника (${t.oppName})...</span>`;
+    const isMyTurn = (t.currentTurn === t.mySymbol && !t.winner);
+    const turnIndicator = t.winner 
+      ? '' 
+      : (isMyTurn
+          ? `<span style="color:var(--success); font-weight:800; font-size:13px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`
+          : `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`);
 
     if (textLabel) {
       textLabel.innerHTML = `
         <div style="text-align:center;">
-          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:4px;">🎮 КРЕСТИКИ-НОЛИКИ (ЖИВОЙ МАТЧ)</div>
+          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:5px;">🎮 КРЕСТИКИ-НОЛИКИ (ЖИВОЙ МАТЧ)</div>
           <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:6px;">
             <span>${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
-            <span style="color:var(--gold); font-size:10px;">VS</span>
+            <span style="color:var(--gold); font-size:11px;">VS</span>
             <span>${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
           </div>
-          <div style="font-size:12px; margin-top:4px;">${turnIndicator}</div>
+          <div style="margin-top:4px;">${turnIndicator}</div>
         </div>
       `;
     }
@@ -6519,11 +6533,11 @@ class WaitPlayApp {
           btn.style.background = 'rgba(245, 158, 11, 0.15)';
         } else {
           btn.innerText = '';
-          if (isMyTurn && !t.winner) {
+          if (isMyTurn) {
             btn.onclick = () => this.handleLiveTTFCellClick(i);
           } else {
             btn.style.cursor = 'not-allowed';
-            btn.style.opacity = '0.7';
+            btn.style.opacity = '0.6';
           }
         }
         optionsBox.appendChild(btn);
@@ -6535,12 +6549,12 @@ class WaitPlayApp {
     const t = this.state.tttTournament;
     if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner) return;
 
-    // Apply move locally
+    // Place symbol locally
     t.board[index] = t.mySymbol;
     t.currentTurn = (t.mySymbol === 'X') ? 'O' : 'X';
     this.playAudioTone('click');
 
-    // Broadcast move to other live phone instantly!
+    // Broadcast move to other live phone
     this.sendNetworkMessage({
       type: 'game_move',
       gameId: 4,
@@ -6586,6 +6600,21 @@ class WaitPlayApp {
       this.initTTFTournament();
     }
   }
+
+  checkTTFWinner(board) {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+    for (const [a, b, c] of lines) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return board[a];
+      }
+    }
+    return null;
+  }
+
   finishTTFMatch(result) {
     const textLabel = document.getElementById('visitor-game-question-text');
     const optionsBox = document.getElementById('visitor-game-options-container');
@@ -6615,28 +6644,7 @@ class WaitPlayApp {
     this.sendNetworkMessage({ type: 'game_restart', gameId: 4 });
     this.initTTFTournament();
   }
-  
 
-  initTTFTournament() {
-    const p1 = { name: "Панда", avatar: "🐼", isUser: true };
-    const p2 = { name: "Волк", avatar: "🐺", isUser: false };
-    
-    this.state.tttTournament = {
-      size: 2,
-      round: 0,
-      bracket: {
-        round1: [{ p1: p1, p2: p2, winner: null }]
-      },
-      currentMatch: { p1: p1, p2: p2 },
-      board: Array(9).fill(null),
-      playerTurn: true,
-      matchStatus: "playing",
-      difficulty: "live",
-      isUserActive: true
-    };
-    
-    this.renderActiveGameQuestion();
-  }
   renderActiveGameQuestion() {
     const qIndex = this.state.activeGameQIndex;
     const gameId = this.state.visitorSelectedGameId;
