@@ -6113,6 +6113,38 @@ class WaitPlayApp {
     this.renderVisitorLobbyGames();
   }
 
+  visitorExitActiveGame() {
+    try {
+      this.state.visitorSelectedGameId = null;
+      this.state.visitorActiveView = 'lobby';
+      
+      this.sendNetworkMessage({
+        type: 'game_exit',
+        playerId: this.myPlayerId
+      });
+
+      const gamePanel = document.getElementById('visitor-game-panel');
+      if (gamePanel) {
+        gamePanel.classList.remove('active');
+        gamePanel.style.display = 'none';
+      }
+      const lobbyPanel = document.getElementById('visitor-lobby-panel');
+      if (lobbyPanel) {
+        lobbyPanel.classList.add('active');
+        lobbyPanel.style.display = 'flex';
+      }
+
+      this.renderVisitorLobbyGames();
+      this.showVisitorToast("Возврат в Игровое Лобби 🎮", false);
+    } catch(e) {
+      console.error("Error in visitorExitActiveGame:", e);
+    }
+  }
+
+  visitorExitActiveGameToLobby() {
+    this.visitorExitActiveGame();
+  }
+
   renderVisitorLobbyGames() {
     const container = document.getElementById('visitor-lobby-games-list');
     const noGamesAlert = document.getElementById('visitor-no-games-alert');
@@ -6431,7 +6463,7 @@ class WaitPlayApp {
     this.renderActiveGameQuestion();
   }
 
-  initTTFTournament() {
+  initTTFTournament(isNextRound = false) {
     if (!this.myPlayerProfile) {
       const names = ["Панда", "Волк", "Лиса", "Лев", "Тигр", "Медведь", "Коала", "Зайка"];
       const avatars = ["🐼", "🐺", "🦊", "🦁", "🐯", "🐻", "🐨", "🐰"];
@@ -6440,7 +6472,14 @@ class WaitPlayApp {
       this.myPlayerProfile = { id: this.myPlayerId, name: names[rIdx], avatar: avatars[rIdx] };
     }
 
-    // Default: Panda (X) vs Wolf (O)
+    let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
+    if (!isNextRound) currentRound = 1;
+
+    let scoreX = (this.state.tttTournament && this.state.tttTournament.scoreX) || 0;
+    let scoreO = (this.state.tttTournament && this.state.tttTournament.scoreO) || 0;
+    let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
+    if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
+
     let mySymbol = 'X';
     let oppSymbol = 'O';
     let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
@@ -6450,7 +6489,6 @@ class WaitPlayApp {
     if (otherPlayers.length > 0) {
       const other = otherPlayers[0];
       oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
-      // Lower ID gets X, higher ID gets O
       if (this.myPlayerId > other.id) {
         mySymbol = 'O';
         oppSymbol = 'X';
@@ -6460,19 +6498,29 @@ class WaitPlayApp {
       }
     }
 
+    // Alternate first turn every round
+    const startingTurn = (currentRound % 2 === 1) ? 'X' : 'O';
+
     this.state.tttTournament = {
-      size: 2,
+      round: currentRound,
+      scoreX: scoreX,
+      scoreO: scoreO,
+      drawsCount: drawsCount,
       mySymbol: mySymbol,
       oppSymbol: oppSymbol,
       myName: myName,
       oppName: oppName,
       board: Array(9).fill(null),
-      currentTurn: 'X',
+      currentTurn: startingTurn,
       status: 'playing',
       winner: null
     };
 
-    // Broadcast that we entered the TicTacToe room
+    const scoreEl = document.getElementById('visitor-game-score');
+    if (scoreEl) {
+      scoreEl.innerText = `Раунд: ${currentRound}`;
+    }
+
     this.sendNetworkMessage({
       type: 'ttt_join',
       gameId: 4,
@@ -6496,16 +6544,19 @@ class WaitPlayApp {
           ? `<span style="color:var(--success); font-weight:800; font-size:13px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`
           : `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`);
 
+    const scoreLine = `🏆 Счёт: ❌ ${t.scoreX} — ⭕ ${t.scoreO} (Ничьих: ${t.drawsCount})`;
+
     if (textLabel) {
       textLabel.innerHTML = `
         <div style="text-align:center;">
-          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:5px;">🎮 КРЕСТИКИ-НОЛИКИ (ЖИВОЙ МАТЧ)</div>
-          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:6px;">
+          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:3px;">🎮 КРЕСТИКИ-НОЛИКИ (РАУНД ${t.round})</div>
+          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:4px;">
             <span>${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
             <span style="color:var(--gold); font-size:11px;">VS</span>
             <span>${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
           </div>
-          <div style="margin-top:4px;">${turnIndicator}</div>
+          <div style="font-size:10px; color:var(--text-muted); margin-bottom:4px;">${scoreLine}</div>
+          <div>${turnIndicator} <span id="live-ttf-turn-timer-badge" style="font-size:12px; font-weight:800; color:var(--gold); margin-left:6px;"></span></div>
         </div>
       `;
     }
@@ -6516,7 +6567,7 @@ class WaitPlayApp {
       optionsBox.style.gridTemplateColumns = 'repeat(3, 1fr)';
       optionsBox.style.gap = '8px';
       optionsBox.style.maxWidth = '280px';
-      optionsBox.style.margin = '15px auto 0 auto';
+      optionsBox.style.margin = '12px auto 0 auto';
 
       for (let i = 0; i < 9; i++) {
         const cell = t.board[i];
@@ -6545,16 +6596,68 @@ class WaitPlayApp {
     }
   }
 
+  startLiveTTFTurnTimer() {
+    this.clearLiveTTFTurnTimer();
+    const limit = this.state.tttTurnLimit || 'none';
+    if (limit === 'none') return;
+    
+    const seconds = parseInt(limit) || 10;
+    this.liveTTFSecondsLeft = seconds;
+    this.updateLiveTTFTimerUI();
+    
+    this.liveTTFTimerInterval = setInterval(() => {
+      this.liveTTFSecondsLeft--;
+      this.updateLiveTTFTimerUI();
+      
+      if (this.liveTTFSecondsLeft <= 0) {
+        this.clearLiveTTFTurnTimer();
+        this.handleLiveTTFTimeout();
+      }
+    }, 1000);
+  }
+
+  clearLiveTTFTurnTimer() {
+    if (this.liveTTFTimerInterval) {
+      clearInterval(this.liveTTFTimerInterval);
+      this.liveTTFTimerInterval = null;
+    }
+  }
+
+  updateLiveTTFTimerUI() {
+    const el = document.getElementById('live-ttf-turn-timer-badge');
+    if (el) {
+      el.innerText = `⏱️ ${this.liveTTFSecondsLeft} сек`;
+      el.style.color = (this.liveTTFSecondsLeft <= 3) ? 'var(--error)' : 'var(--gold)';
+    }
+  }
+
+  handleLiveTTFTimeout() {
+    const t = this.state.tttTournament;
+    if (!t || t.winner || t.currentTurn !== t.mySymbol) return;
+
+    this.showVisitorToast("⌛ Время на ход вышло! Сделан случайный ход.", true);
+    this.playAudioTone('incorrect');
+
+    // Auto-pick first empty cell
+    const emptyCells = [];
+    t.board.forEach((cell, idx) => {
+      if (cell === null) emptyCells.push(idx);
+    });
+
+    if (emptyCells.length > 0) {
+      const chosen = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+      this.handleLiveTTFCellClick(chosen);
+    }
+  }
+
   handleLiveTTFCellClick(index) {
     const t = this.state.tttTournament;
     if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner) return;
 
-    // Place symbol locally
     t.board[index] = t.mySymbol;
     t.currentTurn = (t.mySymbol === 'X') ? 'O' : 'X';
     this.playAudioTone('click');
 
-    // Broadcast move to other live phone
     this.sendNetworkMessage({
       type: 'game_move',
       gameId: 4,
@@ -6566,12 +6669,21 @@ class WaitPlayApp {
     const winner = this.checkTTFWinner(t.board);
     if (winner) {
       t.winner = winner;
+      if (winner === 'X') t.scoreX++;
+      if (winner === 'O') t.scoreO++;
       this.finishTTFMatch(winner);
     } else if (t.board.every(cell => cell !== null)) {
       t.winner = 'draw';
+      t.drawsCount++;
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
+    }
+
+    if (t.currentTurn === t.mySymbol && !t.winner) {
+      this.startLiveTTFTurnTimer();
+    } else {
+      this.clearLiveTTFTurnTimer();
     }
   }
 
@@ -6586,33 +6698,28 @@ class WaitPlayApp {
     const winner = this.checkTTFWinner(t.board);
     if (winner) {
       t.winner = winner;
+      if (winner === 'X') t.scoreX++;
+      if (winner === 'O') t.scoreO++;
       this.finishTTFMatch(winner);
     } else if (t.board.every(cell => cell !== null)) {
       t.winner = 'draw';
+      t.drawsCount++;
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
+    }
+
+    if (t.currentTurn === t.mySymbol && !t.winner) {
+      this.startLiveTTFTurnTimer();
+    } else {
+      this.clearLiveTTFTurnTimer();
     }
   }
 
   handleRemoteTTFRestart(data) {
     if (data.gameId === 4) {
-      this.initTTFTournament();
+      this.initTTFTournament(true);
     }
-  }
-
-  checkTTFWinner(board) {
-    const lines = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8],
-      [0, 3, 6], [1, 4, 7], [2, 5, 8],
-      [0, 4, 8], [2, 4, 6]
-    ];
-    for (const [a, b, c] of lines) {
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return board[a];
-      }
-    }
-    return null;
   }
 
   finishTTFMatch(result) {
@@ -6620,21 +6727,42 @@ class WaitPlayApp {
     const optionsBox = document.getElementById('visitor-game-options-container');
     const t = this.state.tttTournament;
 
+    let resultHtml = '';
     if (result === 'draw') {
-      this.showVisitorToast("🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!", false);
-      if (textLabel) textLabel.innerHTML = `<h3 style="color:#fff; text-align:center;">🤝 ИГРА ЗАВЕРШИЛАСЬ ВНИЧЬЮ!</h3>`;
+      this.showVisitorToast("🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:#fff; margin-bottom:6px;">🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
+        </div>
+      `;
     } else if (t && result === t.mySymbol) {
-      this.showVisitorToast("🎉 ПОБЕДА! ВЫ ВЫИГРАЛИ МАТЧ!", false);
-      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--success); text-align:center;">🎉 ПОБЕДА! ВЫ ВЫИГРАЛИ! 🏆</h3>`;
+      this.showVisitorToast("🎉 ВЫ ВЫИГРАЛИ ЭТОТ РАУНД!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:var(--success); margin-bottom:6px;">🎉 ВЫ ВЫИГРАЛИ РАУНД! 🏆</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t.scoreX} — ⭕ ${t.scoreO}</div>
+        </div>
+      `;
     } else {
-      this.showVisitorToast("👏 МАТЧ ЗАВЕРШЕН! Победил соперник.", false);
-      if (textLabel) textLabel.innerHTML = `<h3 style="color:var(--gold); text-align:center;">👏 Победил соперник (${t ? t.oppName : ''})</h3>`;
+      this.showVisitorToast("👏 РАУНД ВЫИГРАЛ СОПЕРНИК!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:var(--gold); margin-bottom:6px;">👏 Раунд выиграл соперник (${t ? t.oppName : ''})</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
+        </div>
+      `;
     }
+
+    if (textLabel) textLabel.innerHTML = resultHtml;
 
     if (optionsBox) {
       optionsBox.innerHTML = `
-        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800;" onclick="app.requestLiveTTFRestart()">
-          🔄 Сыграть ещё раунд 🎯
+        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800; font-size: 14px; margin-bottom: 8px;" onclick="app.requestLiveTTFRestart()">
+          🔄 Следующий раунд 🎯
+        </button>
+        <button class="btn btn-secondary" style="grid-column: 1 / -1; width: 100%; padding: 10px; font-size: 12px; font-weight: 700;" onclick="app.visitorExitActiveGame()">
+          🚪 Вернуться в Лобби
         </button>
       `;
     }
@@ -6642,7 +6770,7 @@ class WaitPlayApp {
 
   requestLiveTTFRestart() {
     this.sendNetworkMessage({ type: 'game_restart', gameId: 4 });
-    this.initTTFTournament();
+    this.initTTFTournament(true);
   }
 
   renderActiveGameQuestion() {
