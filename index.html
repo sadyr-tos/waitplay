@@ -7,9 +7,9 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <meta name="theme-color" content="#0b0a13">
-  <link rel="stylesheet" href="style.css?v=42.0.0">
+  <link rel="stylesheet" href="style.css?v=43.0.0">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="app.js?v=42.0.0"></script>
+  <script src="app.js?v=43.0.0"></script>
   <script>
     // Force unregister any stale service workers & purge CacheStorage
     if ('serviceWorker' in navigator) {
@@ -552,19 +552,15 @@
           </div>
 
           <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:14px; padding:15px; display:flex; flex-direction:column; gap:15px;">
-            <!-- 1. Количество участников (Живые посетители) -->
-            <div class="form-group" style="margin-bottom:0;">
-              <label>Количество Участников Турнира</label>
-              <div style="display:flex; align-items:center; gap:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:6px 10px;">
-                <button class="btn btn-secondary" id="btn-ttt-size-dec" onclick="app.adjustTTTSize(-1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">-</button>
-                <span id="label-ttt-size" style="flex:1; text-align:center; font-size:12px; font-weight:700; color:#fff;">8 игроков (3 раунда)</span>
-                <button class="btn btn-secondary" id="btn-ttt-size-inc" onclick="app.adjustTTTSize(1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">+</button>
-              </div>
+            <!-- Инфо блок об авто-масштабировании игроков -->
+            <div style="background:rgba(139, 92, 246, 0.1); border:1px solid var(--border-light); border-radius:10px; padding:10px; font-size:11px; color:#fff; line-height:1.4;">
+              <div style="font-weight:800; color:var(--gold); margin-bottom:3px;">⚡ Авто-набор участников:</div>
+              <div>Парный формат (2, 4 или 8 человек). Игра автоматически формирует пары живых игроков за 15 секунд.</div>
             </div>
 
-            <!-- 2. Лимит времени на ход (Живые посетители) -->
+            <!-- 1. Лимит времени на ход (Живые посетители) -->
             <div class="form-group" style="margin-bottom:0;">
-              <label>Лимит времени на ход</label>
+              <label>Лимит времени на ход (Защита от затягивания)</label>
               <select id="settings-ttt-turn-limit" onchange="app.saveTTTConfig('tttTurnLimit', this.value)" style="width:100%; padding:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; color:#fff; font-size:12px; outline:none;">
                 <option value="none">Без лимита (по-семейному) ☕</option>
                 <option value="5">5 секунд (блиц) ⚡</option>
@@ -574,9 +570,9 @@
               </select>
             </div>
 
-            <!-- 3. Лимит ничьих в матче (Живые посетители) -->
+            <!-- 2. Лимит ничьих в матче (Живые посетители) -->
             <div class="form-group" style="margin-bottom:0;">
-              <label>Лимит ничьих в матче (от 3 до 50)</label>
+              <label>Лимит ничьих в матче</label>
               <div style="display:flex; align-items:center; gap:10px; background:#110e1f; border:1px solid var(--border-light); border-radius:10px; padding:6px 10px;">
                 <button class="btn btn-secondary" id="btn-ttt-draws-dec" onclick="app.adjustTTTMaxDraws(-1)" style="width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; border-radius:8px; margin:0;">-</button>
                 <span id="label-ttt-draws" style="flex:1; text-align:center; font-size:12px; font-weight:700; color:#fff;">3 ничьих</span>

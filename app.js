@@ -80,7 +80,7 @@ const DEFAULT_GAMES = [
   { id: 1, name: "Викторина 🎯", icon: "🎯", minPlayers: 10, maxPlayers: 15, enabled: true, published: true, isPro: false, isAIGenerated: false },
   { id: 2, name: "Кроссворд 📝", icon: "📝", minPlayers: 6, maxPlayers: 10, enabled: true, published: true, isPro: false, isAIGenerated: false },
   { id: 3, name: "Поле Чудес 🗣️", icon: "🗣️", minPlayers: 2, maxPlayers: 5, enabled: true, published: true, isPro: false, isAIGenerated: false },
-  { id: 4, name: "Крестики-нолики ❌⭕", icon: "❌⭕", minPlayers: 2, maxPlayers: 2, enabled: true, published: true, isPro: false, isAIGenerated: false },
+  { id: 4, name: "Крестики-нолики ❌⭕", icon: "❌⭕", minPlayers: 2, maxPlayers: 8, enabled: true, published: true, isPro: false, isAIGenerated: false },
   { id: 5, name: "Мемори 🧠", icon: "🧠", minPlayers: 2, maxPlayers: 4, enabled: true, published: true, isPro: false, isAIGenerated: false },
   { id: 6, name: "Найди отличия 🔍", icon: "🔍", minPlayers: 2, maxPlayers: 10, enabled: true, published: true, isPro: false, isAIGenerated: false },
   { id: 7, name: "Нарезка 🔪", icon: "🔪", minPlayers: 2, maxPlayers: 8, enabled: true, published: true, isPro: false, isAIGenerated: false },
@@ -6171,6 +6171,63 @@ class WaitPlayApp {
 
   visitorExitActiveGameToLobby() {
     this.visitorExitActiveGame();
+  }
+
+  showGameRules(gameId, event) {
+    if (event) event.stopPropagation();
+
+    const branch = this.getVisitorConnectedBranch();
+    const branchGames = branch ? (branch.games || JSON.parse(JSON.stringify(DEFAULT_GAMES))) : this.state.games;
+    const game = branchGames.find(g => g.id === gameId);
+    if (!game) return;
+
+    let rulesHtml = "";
+    if (gameId === 4) {
+      rulesHtml = `
+        <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:10px; text-align:center;">🎮 ПРАВИЛА: КРЕСТИКИ-НОЛИКИ ❌⭕</div>
+        <div style="font-size:11px; color:#fff; line-height:1.5; text-align:left; display:flex; flex-direction:column; gap:8px;">
+          <div><b>👥 Участники:</b> Парный формат <b>(2, 4 или 8 человек)</b>.</div>
+          <div><b>⏱️ Набор игроков:</b> Длится 15 секунд в лобби.</div>
+          <div><b>⚔️ Как проходят игры:</b>
+            <ul style="margin:4px 0 0 15px; padding:0; color:var(--text-muted);">
+              <li><b>2 игрока:</b> Прямая живая дуэль 1 на 1.</li>
+              <li><b>4 игрока:</b> Турнир (Полуфинал и Финал).</li>
+              <li><b>8 игроков:</b> Турнирная сетка на 8 участников.</li>
+            </ul>
+          </div>
+          <div><b>🎯 Цель:</b> Первым выстроить линию из 3 своих знаков (❌ или ⭕) по горизонтали, вертикали или диагонали!</div>
+        </div>
+      `;
+    } else {
+      rulesHtml = `
+        <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:10px; text-align:center;">${game.icon} ${game.name}</div>
+        <div style="font-size:11px; color:#fff; line-height:1.5; text-align:left;">
+          <div><b>👥 Вместимость:</b> ${game.minPlayers}–${game.maxPlayers} чел.</div>
+          <div style="margin-top:6px;">Отвечайте на вопросы или выполняйте задания быстрее соперников, чтобы занять 1-е место и получить приз!</div>
+        </div>
+      `;
+    }
+
+    // Render modal
+    let modal = document.getElementById('game-rules-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'game-rules-modal';
+      modal.className = 'modal';
+      modal.style.cssText = 'display:flex; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:99999; align-items:center; justify-content:center;';
+      document.body.appendChild(modal);
+    }
+
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div style="background:var(--card-bg, #18142c); border:1px solid var(--border-light); border-radius:18px; padding:20px; max-width:320px; width:90%; box-shadow:0 10px 30px rgba(0,0,0,0.5); position:relative;">
+        <button onclick="document.getElementById('game-rules-modal').style.display='none'" style="position:absolute; top:12px; right:12px; background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer;">✖</button>
+        ${rulesHtml}
+        <button class="btn btn-primary" onclick="document.getElementById('game-rules-modal').style.display='none'" style="width:100%; padding:10px; font-weight:800; font-size:12px; margin-top:15px;">
+          Понятно, закрыть ✔️
+        </button>
+      </div>
+    `;
   }
 
   renderVisitorLobbyGames() {
