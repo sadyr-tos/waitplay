@@ -449,11 +449,39 @@ class WaitPlayApp {
         };
         this.updateLivePlayersCorridorUI();
       }
-    } else if (data.type === 'game_move') {
+    } else if (data.type === 'queue_join') {
+      this.queuePlayers = this.queuePlayers || {};
+      this.queuePlayers[data.senderId] = {
+        ...(data.profile || {}),
+        id: data.senderId,
+        gameId: data.gameId,
+        joinTime: data.timestamp || Date.now()
+      };
+      if (this.state.visitorSelectedGameId === data.gameId) {
+        this.updateLiveQueueUI();
+      }
+    } else if (data.type === 'queue_leave') {
+      if (this.queuePlayers && this.queuePlayers[data.playerId || data.senderId]) {
+        delete this.queuePlayers[data.playerId || data.senderId];
+      }
+      if (this.state.visitorSelectedGameId === data.gameId) {
+        this.updateLiveQueueUI();
+      }
+    } else if (data.type === 'room_busy') {
+      this.roomStatus = this.roomStatus || {};
+      this.roomStatus[data.gameId] = {
+        busy: data.busy,
+        players: data.players
+      };
+    } else if (data.type === 'ttt_join') {
+      this.handleRemoteTTFJoin(data);
+    } else if (data.type === 'ttt_paired') {
+      this.handleRemoteTTFPaired(data);
+    } else if (data.type === 'ttt_move' || data.type === 'game_move') {
       if (data.gameId === 4) {
         this.handleRemoteTTFMove(data);
       }
-    } else if (data.type === 'game_restart') {
+    } else if (data.type === 'ttt_rematch' || data.type === 'game_restart') {
       if (data.gameId === 4) {
         this.handleRemoteTTFRestart(data);
       }
@@ -6209,105 +6237,167 @@ class WaitPlayApp {
       this.showVisitorToast("🛠️ В данный момент ведутся технические работы. Игры временно недоступны!", true);
       return;
     }
+
+    // Check if room is currently busy with an active match
+    if (this.roomStatus && this.roomStatus[gameId] && this.roomStatus[gameId].busy) {
+      this.showVisitorToast(`🔒 Комната занята! Идет активный раунд (${this.roomStatus[gameId].players || 'игроков'}). Подождите окончания.`, true);
+      return;
+    }
     
     this.state.visitorSelectedGameId = gameId;
     this.saveState();
     
-    document.getElementById('lobby-queue-overlay').style.display = 'flex';
+    const overlay = document.getElementById('lobby-queue-overlay');
+    if (overlay) overlay.style.display = 'flex';
     
-    // Clean old radar avatars
     const radarBox = document.getElementById('visitor-radar-box');
     if (radarBox) {
-      const avatars = radarBox.querySelectorAll('.radar-avatar');
-      avatars.forEach(av => av.remove());
+      radarBox.innerHTML = '';
+      if (this.myPlayerProfile) {
+        this.spawnRadarAvatar(this.myPlayerProfile.avatar || '🐼', 0);
+      }
     }
     
-    const branch = this.getVisitorConnectedBranch();
-    const branchGames = branch ? (branch.games || JSON.parse(JSON.stringify(DEFAULT_GAMES))) : this.state.games;
-    const game = branchGames.find(g => g.id === gameId);
-
-    let currentPlayers = 1;
-    const targetMin = game ? game.minPlayers : 10;
-    const targetMax = game ? game.maxPlayers : 15;
     const lobbyCounter = document.getElementById('visitor-lobby-players-count');
     const countdownTimer = document.getElementById('lobby-countdown-timer');
+    const labelEl = document.getElementById('lobby-countdown-label');
+    
+    if (labelEl) labelEl.innerText = 'Набор игроков в комнату:';
+    if (countdownTimer) countdownTimer.innerText = '15 сек';
 
+    // Broadcast queue join to corridor
+    this.queuePlayers = this.queuePlayers || {};
+    this.queuePlayers[this.myPlayerId] = {
+      ...this.myPlayerProfile,
+      gameId: gameId,
+      joinTime: Date.now()
+    };
+
+    this.sendNetworkMessage({
+      type: 'queue_join',
+      gameId: gameId,
+      profile: this.myPlayerProfile
+    });
+
+    this.updateLiveQueueUI();
+
+    // 15-Second Matchmaking Window
     clearInterval(this.state.lobbyCountdown);
-    clearInterval(this.state.lobbyJoinInterval);
-    lobbyCounter.innerText = `👥 ${currentPlayers} / ${targetMax}`;
-    countdownTimer.innerText = '--';
+    this.state.lobbyTimerVal = 15;
 
-    const avatarsList = ["🦊", "🐼", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔", "🐷"];
+    this.state.lobbyCountdown = setInterval(() => {
+      this.state.lobbyTimerVal--;
+      if (countdownTimer) countdownTimer.innerText = `${this.state.lobbyTimerVal} сек`;
 
-    this.state.lobbyJoinInterval = setInterval(() => {
-      if (currentPlayers < targetMin) {
-        const added = Math.floor(Math.random() * 2) + 1;
-        for (let a = 0; a < added; a++) {
-          if (currentPlayers < targetMin) {
-            this.spawnRadarAvatar(avatarsList[currentPlayers % avatarsList.length], currentPlayers);
-            currentPlayers++;
-          }
-        }
-        
-        lobbyCounter.innerText = `👥 ${currentPlayers} / ${targetMax}`;
-        
-        if (currentPlayers >= targetMin) {
-          this.state.lobbyTimerVal = 7;
-          countdownTimer.innerText = `${this.state.lobbyTimerVal} сек`;
-          const labelEl = document.getElementById('lobby-countdown-label');
-          if (labelEl) labelEl.innerText = 'Приготовиться к старту!';
-          
-          this.state.lobbyCountdown = setInterval(() => {
-            this.state.lobbyTimerVal--;
-            countdownTimer.innerText = `${this.state.lobbyTimerVal} сек`;
-
-            if (currentPlayers < targetMax && Math.random() > 0.6) {
-              this.spawnRadarAvatar(avatarsList[currentPlayers % avatarsList.length], currentPlayers);
-              currentPlayers++;
-              lobbyCounter.innerText = `👥 ${currentPlayers} / ${targetMax}`;
-            }
-
-            if (this.state.lobbyTimerVal <= 0) {
-              clearInterval(this.state.lobbyCountdown);
-              clearInterval(this.state.lobbyJoinInterval);
-              document.getElementById('lobby-queue-overlay').style.display = 'none';
-              this.startActiveGame(currentPlayers);
-            }
-          }, 1000);
-        }
+      if (this.state.lobbyTimerVal <= 0) {
+        clearInterval(this.state.lobbyCountdown);
+        this.finishQueueMatchmaking(gameId);
       }
     }, 1000);
   }
 
-  spawnRadarAvatar(avatar, index) {
+  updateLiveQueueUI() {
+    const gameId = this.state.visitorSelectedGameId;
+    const inQueue = Object.values(this.queuePlayers || {}).filter(p => p.gameId === gameId);
+    const lobbyCounter = document.getElementById('visitor-lobby-players-count');
+    if (lobbyCounter) {
+      lobbyCounter.innerText = `👥 В очереди: ${inQueue.length} чел.`;
+    }
+
     const radarBox = document.getElementById('visitor-radar-box');
-    if (!radarBox) return;
-    
-    const el = document.createElement('div');
-    el.className = 'radar-avatar';
-    el.innerText = avatar;
-    
-    // Position randomly on perimeter of radar circle
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 25 + Math.random() * 8; // px radius
-    const x = Math.cos(angle) * radius + 35; // centered in 90px container
-    const y = Math.sin(angle) * radius + 35;
-    
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-    
-    // Small random translation offset for animation dx/dy float
-    const dx = (Math.random() - 0.5) * 8;
-    const dy = (Math.random() - 0.5) * 8;
-    el.style.transform = `translate(${dx}px, ${dy}px)`;
-    
-    radarBox.appendChild(el);
+    if (radarBox) {
+      radarBox.innerHTML = '';
+      inQueue.forEach((p, idx) => {
+        this.spawnRadarAvatar(p.avatar || '👤', idx);
+      });
+    }
+  }
+
+  finishQueueMatchmaking(gameId) {
+    const inQueue = Object.values(this.queuePlayers || {}).filter(p => p.gameId === gameId);
+    const count = inQueue.length;
+
+    if (count < 2) {
+      // Not enough players (< 2)
+      this.showQueueFailureModal("Недостаточно игроков", "За 15 секунд в комнату зашел только 1 человек. Для игры требуется минимум 2 живых игрока.");
+      return;
+    }
+
+    // Sort by join time
+    inQueue.sort((a, b) => (a.joinTime || 0) - (b.joinTime || 0));
+
+    // Check if odd count (e.g. 3 players)
+    const myIndex = inQueue.findIndex(p => p.id === this.myPlayerId);
+    const evenPairedCount = Math.floor(count / 2) * 2;
+
+    if (myIndex >= evenPairedCount) {
+      // Odd player out
+      this.showQueueFailureModal("Пара не найдена", "В комнату зашло нечетное число участников. Первые игроки начали матч, вы будете первыми в очереди на следующий раунд!");
+      return;
+    }
+
+    // Mark room as busy for others
+    this.sendNetworkMessage({
+      type: 'room_busy',
+      gameId: gameId,
+      busy: true,
+      players: `${inQueue[0].name} vs ${inQueue[1].name}`
+    });
+
+    // Successfully paired! Launch game!
+    const overlay = document.getElementById('lobby-queue-overlay');
+    if (overlay) overlay.style.display = 'none';
+
+    this.startActiveGame(2);
+  }
+
+  showQueueFailureModal(title, message) {
+    const overlay = document.getElementById('lobby-queue-overlay');
+    if (overlay) {
+      overlay.innerHTML = `
+        <div style="background:var(--card-bg, #18142c); border:1px solid var(--border-light); border-radius:18px; padding:25px; max-width:320px; width:90%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); position:relative;">
+          <button onclick="app.visitorLeaveQueue()" style="position:absolute; top:12px; right:12px; background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer;">✖</button>
+          <div style="font-size:36px; margin-bottom:10px;">⚠️</div>
+          <div style="font-size:16px; font-weight:800; color:var(--gold); margin-bottom:8px;">${title}</div>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:20px;">
+            ${message}
+          </div>
+          <button class="btn btn-primary" onclick="app.visitorLeaveQueue()" style="width:100%; padding:12px; font-weight:800; font-size:12px; margin:0;">
+            ↩️ Вернуться в Лобби
+          </button>
+        </div>
+      `;
+    }
   }
 
   visitorLeaveQueue() {
     clearInterval(this.state.lobbyCountdown);
-    clearInterval(this.state.lobbyJoinInterval);
-    document.getElementById('lobby-queue-overlay').style.display = 'none';
+    const gameId = this.state.visitorSelectedGameId;
+    if (this.queuePlayers && this.queuePlayers[this.myPlayerId]) {
+      delete this.queuePlayers[this.myPlayerId];
+    }
+    
+    this.sendNetworkMessage({
+      type: 'queue_leave',
+      gameId: gameId,
+      playerId: this.myPlayerId
+    });
+
+    const overlay = document.getElementById('lobby-queue-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      // Restore default template
+      overlay.innerHTML = `
+        <div class="lobby-radar-container">
+          <div class="lobby-radar-circle" id="visitor-radar-box"></div>
+          <div class="lobby-radar-pulse"></div>
+        </div>
+        <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
+        <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">15 сек</div>
+        <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: 1 чел.</div>
+        <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
+      `;
+    }
     this.initVisitorLobby();
   }
 
@@ -6480,54 +6570,127 @@ class WaitPlayApp {
     let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
     if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
 
-    let mySymbol = 'X';
-    let oppSymbol = 'O';
-    let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
-    let oppName = "🐺 Волк (Игрок 2)";
+    // Check if another player is already waiting in this room
+    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
 
-    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p.id !== this.myPlayerId);
     if (otherPlayers.length > 0) {
-      const other = otherPlayers[0];
-      oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
-      if (this.myPlayerId > other.id) {
-        mySymbol = 'O';
-        oppSymbol = 'X';
-      } else {
-        mySymbol = 'X';
-        oppSymbol = 'O';
-      }
+      // We are Guest (O) pairing with the existing Host (X)
+      const host = otherPlayers[0];
+      this.state.tttTournament = {
+        round: currentRound,
+        scoreX: scoreX,
+        scoreO: scoreO,
+        drawsCount: drawsCount,
+        isHost: false,
+        mySymbol: 'O',
+        oppSymbol: 'X',
+        myName: `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`,
+        oppName: `${host.avatar || '👤'} ${host.name || 'Игрок 1'}`,
+        board: Array(9).fill(null),
+        currentTurn: 'X',
+        status: 'playing',
+        winner: null
+      };
+
+      // Notify Host that we joined and paired
+      this.sendNetworkMessage({
+        type: 'ttt_paired',
+        gameId: 4,
+        hostId: host.id,
+        hostProfile: host,
+        guestId: this.myPlayerId,
+        guestProfile: this.myPlayerProfile,
+        round: currentRound
+      });
+    } else {
+      // We are Host (X) waiting for Player 2
+      this.state.tttTournament = {
+        round: currentRound,
+        scoreX: scoreX,
+        scoreO: scoreO,
+        drawsCount: drawsCount,
+        isHost: true,
+        mySymbol: 'X',
+        oppSymbol: 'O',
+        myName: `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`,
+        oppName: '⏳ Ожидание игрока 2...',
+        board: Array(9).fill(null),
+        currentTurn: 'X',
+        status: 'waiting',
+        winner: null
+      };
+
+      this.sendNetworkMessage({
+        type: 'ttt_join',
+        gameId: 4,
+        profile: this.myPlayerProfile
+      });
     }
-
-    // Alternate first turn every round
-    const startingTurn = (currentRound % 2 === 1) ? 'X' : 'O';
-
-    this.state.tttTournament = {
-      round: currentRound,
-      scoreX: scoreX,
-      scoreO: scoreO,
-      drawsCount: drawsCount,
-      mySymbol: mySymbol,
-      oppSymbol: oppSymbol,
-      myName: myName,
-      oppName: oppName,
-      board: Array(9).fill(null),
-      currentTurn: startingTurn,
-      status: 'playing',
-      winner: null
-    };
 
     const scoreEl = document.getElementById('visitor-game-score');
     if (scoreEl) {
       scoreEl.innerText = `Раунд: ${currentRound}`;
     }
 
+    this.renderActiveGameQuestion();
+  }
+
+  handleRemoteTTFJoin(data) {
+    const t = this.state.tttTournament;
+    if (!t || !t.isHost) return;
+
+    // As Host, pair with incoming Guest
+    const guest = data.profile || { name: 'Игрок 2', avatar: '🐺', id: data.senderId };
+    t.oppName = `${guest.avatar} ${guest.name}`;
+    t.status = 'playing';
+
+    // Broadcast confirmation to Guest
     this.sendNetworkMessage({
-      type: 'ttt_join',
+      type: 'ttt_paired',
       gameId: 4,
-      profile: this.myPlayerProfile
+      hostId: this.myPlayerId,
+      hostProfile: this.myPlayerProfile,
+      guestId: data.senderId,
+      guestProfile: guest,
+      round: t.round
     });
 
     this.renderActiveGameQuestion();
+    if (t.currentTurn === t.mySymbol) {
+      this.startLiveTTFTurnTimer();
+    }
+  }
+
+  handleRemoteTTFPaired(data) {
+    const t = this.state.tttTournament;
+    if (!t) return;
+
+    if (this.myPlayerId === data.hostId) {
+      // I am Host (X)
+      t.isHost = true;
+      t.mySymbol = 'X';
+      t.oppSymbol = 'O';
+      t.myName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
+      t.oppName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
+      t.status = 'playing';
+      t.currentTurn = 'X';
+    } else if (this.myPlayerId === data.guestId) {
+      // I am Guest (O)
+      t.isHost = false;
+      t.mySymbol = 'O';
+      t.oppSymbol = 'X';
+      t.myName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
+      t.oppName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
+      t.status = 'playing';
+      t.currentTurn = 'X';
+    }
+
+    this.renderActiveGameQuestion();
+    if (t.currentTurn === t.mySymbol) {
+      this.startLiveTTFTurnTimer();
+    } else {
+      this.clearLiveTTFTurnTimer();
+    }
   }
 
   renderTTFBoard(optionsBox, textLabel) {
@@ -6537,12 +6700,19 @@ class WaitPlayApp {
       return;
     }
 
-    const isMyTurn = (t.currentTurn === t.mySymbol && !t.winner);
-    const turnIndicator = t.winner 
-      ? '' 
-      : (isMyTurn
-          ? `<span style="color:var(--success); font-weight:800; font-size:13px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`
-          : `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`);
+    const isWaiting = (t.status === 'waiting');
+    const isMyTurn = (!isWaiting && t.currentTurn === t.mySymbol && !t.winner);
+    
+    let turnIndicator = '';
+    if (isWaiting) {
+      turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px; animation:pulse 1.5s infinite;">⏳ Ожидание второго живого игрока...</span>`;
+    } else if (t.winner) {
+      turnIndicator = '';
+    } else if (isMyTurn) {
+      turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:13px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
+    } else {
+      turnIndicator = `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`;
+    }
 
     const scoreLine = `🏆 Счёт: ❌ ${t.scoreX} — ⭕ ${t.scoreO} (Ничьих: ${t.drawsCount})`;
 
@@ -6596,70 +6766,17 @@ class WaitPlayApp {
     }
   }
 
-  startLiveTTFTurnTimer() {
-    this.clearLiveTTFTurnTimer();
-    const limit = this.state.tttTurnLimit || 'none';
-    if (limit === 'none') return;
-    
-    const seconds = parseInt(limit) || 10;
-    this.liveTTFSecondsLeft = seconds;
-    this.updateLiveTTFTimerUI();
-    
-    this.liveTTFTimerInterval = setInterval(() => {
-      this.liveTTFSecondsLeft--;
-      this.updateLiveTTFTimerUI();
-      
-      if (this.liveTTFSecondsLeft <= 0) {
-        this.clearLiveTTFTurnTimer();
-        this.handleLiveTTFTimeout();
-      }
-    }, 1000);
-  }
-
-  clearLiveTTFTurnTimer() {
-    if (this.liveTTFTimerInterval) {
-      clearInterval(this.liveTTFTimerInterval);
-      this.liveTTFTimerInterval = null;
-    }
-  }
-
-  updateLiveTTFTimerUI() {
-    const el = document.getElementById('live-ttf-turn-timer-badge');
-    if (el) {
-      el.innerText = `⏱️ ${this.liveTTFSecondsLeft} сек`;
-      el.style.color = (this.liveTTFSecondsLeft <= 3) ? 'var(--error)' : 'var(--gold)';
-    }
-  }
-
-  handleLiveTTFTimeout() {
-    const t = this.state.tttTournament;
-    if (!t || t.winner || t.currentTurn !== t.mySymbol) return;
-
-    this.showVisitorToast("⌛ Время на ход вышло! Сделан случайный ход.", true);
-    this.playAudioTone('incorrect');
-
-    // Auto-pick first empty cell
-    const emptyCells = [];
-    t.board.forEach((cell, idx) => {
-      if (cell === null) emptyCells.push(idx);
-    });
-
-    if (emptyCells.length > 0) {
-      const chosen = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-      this.handleLiveTTFCellClick(chosen);
-    }
-  }
-
   handleLiveTTFCellClick(index) {
     const t = this.state.tttTournament;
-    if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner) return;
+    if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner || t.status !== 'playing') return;
 
+    this.clearLiveTTFTurnTimer();
     t.board[index] = t.mySymbol;
     t.currentTurn = (t.mySymbol === 'X') ? 'O' : 'X';
     this.playAudioTone('click');
 
     this.sendNetworkMessage({
-      type: 'game_move',
+      type: 'ttt_move',
       gameId: 4,
       cellIndex: index,
       symbol: t.mySymbol,
@@ -6679,18 +6796,13 @@ class WaitPlayApp {
     } else {
       this.renderActiveGameQuestion();
     }
-
-    if (t.currentTurn === t.mySymbol && !t.winner) {
-      this.startLiveTTFTurnTimer();
-    } else {
-      this.clearLiveTTFTurnTimer();
-    }
   }
 
   handleRemoteTTFMove(data) {
     const t = this.state.tttTournament;
     if (!t || data.gameId !== 4) return;
 
+    this.clearLiveTTFTurnTimer();
     t.board[data.cellIndex] = data.symbol;
     t.currentTurn = data.nextTurn;
     this.playAudioTone('click');
@@ -6707,12 +6819,9 @@ class WaitPlayApp {
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
-    }
-
-    if (t.currentTurn === t.mySymbol && !t.winner) {
-      this.startLiveTTFTurnTimer();
-    } else {
-      this.clearLiveTTFTurnTimer();
+      if (t.currentTurn === t.mySymbol) {
+        this.startLiveTTFTurnTimer();
+      }
     }
   }
 
@@ -6722,7 +6831,22 @@ class WaitPlayApp {
     }
   }
 
+  checkTTFWinner(board) {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+    for (const [a, b, c] of lines) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return board[a];
+      }
+    }
+    return null;
+  }
+
   finishTTFMatch(result) {
+    this.clearLiveTTFTurnTimer();
     const textLabel = document.getElementById('visitor-game-question-text');
     const optionsBox = document.getElementById('visitor-game-options-container');
     const t = this.state.tttTournament;
@@ -6769,7 +6893,7 @@ class WaitPlayApp {
   }
 
   requestLiveTTFRestart() {
-    this.sendNetworkMessage({ type: 'game_restart', gameId: 4 });
+    this.sendNetworkMessage({ type: 'ttt_rematch', gameId: 4 });
     this.initTTFTournament(true);
   }
 
