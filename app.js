@@ -6096,6 +6096,13 @@ class WaitPlayApp {
       if (this.state.visitorSelectedGameId === data.gameId) {
         this.updateLiveQueueUI();
       }
+    } else if (data.type === 'game_exit') {
+      if (this.roomStatus && this.roomStatus[data.gameId || 4]) {
+        this.roomStatus[data.gameId || 4] = { busy: false };
+      }
+      if (this.livePlayers && this.livePlayers[data.playerId || data.senderId]) {
+        this.livePlayers[data.playerId || data.senderId].gameId = null;
+      }
     } else if (data.type === 'room_busy') {
       this.roomStatus = this.roomStatus || {};
       this.roomStatus[data.gameId] = {
@@ -6145,11 +6152,17 @@ class WaitPlayApp {
 
   visitorExitActiveGame() {
     try {
+      const exitingGameId = this.state.visitorSelectedGameId || 4;
       this.state.visitorSelectedGameId = null;
       this.state.visitorActiveView = 'lobby';
       
+      if (this.roomStatus && this.roomStatus[exitingGameId]) {
+        this.roomStatus[exitingGameId] = { busy: false };
+      }
+
       this.sendNetworkMessage({
         type: 'game_exit',
+        gameId: exitingGameId,
         playerId: this.myPlayerId
       });
 
@@ -6247,7 +6260,8 @@ class WaitPlayApp {
         return;
       }
 
-      if (this.roomStatus && this.roomStatus[gameId] && this.roomStatus[gameId].busy) {
+      const activeOpponentsInGame = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && p.gameId === gameId);
+      if (activeOpponentsInGame.length >= 2 && this.roomStatus && this.roomStatus[gameId] && this.roomStatus[gameId].busy) {
         this.showVisitorToast(`🔒 Комната занята! Идет активный раунд (${this.roomStatus[gameId].players || 'игроков'}). Подождите окончания.`, true);
         return;
       }
@@ -7494,183 +7508,9 @@ class WaitPlayApp {
       this.simulateVisitorDiffBotsAnswering(oddCellIdx);
     } else if (gameId === 4) {
       const typeLabel = document.getElementById('visitor-game-type-label');
-      if (typeLabel) typeLabel.innerText = "ТУРНИР КРЕСТИКИ-НОЛИКИ";
-      optionsBox.style.display = 'block';
-      const t = this.state.tttTournament;
-      if (!t) {
-        this.initTTFTournament();
-        return;
-      }
-      
-      const roundsCount = Math.log2(t.size);
-      const remainingRounds = roundsCount - t.round;
-      let roundName = "Матч";
-      if (remainingRounds === 1) roundName = "Финал";
-      else if (remainingRounds === 2) roundName = "1/2 финала";
-      else if (remainingRounds === 3) roundName = "1/4 финала";
-      else if (remainingRounds === 4) roundName = "1/8 финала";
-      
-      document.getElementById('visitor-game-q-index').innerText = `${roundName} (Турнир)`;
-      
-      if (t.matchStatus === 'bracket') {
-        const opp = t.bracket[`round${t.round + 1}`].find(m => m.p1.isUser || m.p2.isUser);
-        const opponent = opp.p1.isUser ? opp.p2 : opp.p1;
-        
-        textLabel.innerHTML = `
-          <div style="text-align:center;">
-            <div style="font-size:11px; font-weight:800; color:var(--gold); margin-bottom:5px; text-transform:uppercase;">🏆 ТУРНИРНАЯ СЕТКА (${t.size} игроков)</div>
-            <div style="font-size:10px; color:#fff; margin-bottom:10px;">Текущий круг: <b>${roundName}</b></div>
-            
-            <div style="background:rgba(0,0,0,0.3); border:1px solid var(--border-light); border-radius:10px; padding:10px; margin-bottom:12px; display:inline-block; width:100%; box-sizing:border-box;">
-              <div style="display:flex; justify-content:center; align-items:center; gap:8px;">
-                <div style="font-size:16px;">💻 Вы</div>
-                <div style="font-size:12px; color:var(--primary); font-weight:800;">VS</div>
-                <div style="font-size:16px;">${opponent.avatar} ${opponent.name}</div>
-              </div>
-              <div style="font-size:9px; color:var(--text-muted); margin-top:6px;">Победите в матче, чтобы получить приз, нужно занять 1-е место!</div>
-            </div>
-          </div>
-        `;
-        
-        optionsBox.innerHTML = '';
-        const playBtn = document.createElement('button');
-        playBtn.className = 'btn btn-primary';
-        playBtn.style.width = '100%';
-        playBtn.style.padding = '12px';
-        playBtn.style.fontWeight = '800';
-        playBtn.innerHTML = `⚔️ НАЧАТЬ МАТЧ`;
-        playBtn.onclick = () => {
-          t.matchStatus = 'playing';
-          t.board.fill(null);
-          t.playerTurn = Math.random() > 0.5;
-          this.renderActiveGameQuestion();
-          if (!t.playerTurn) {
-            setTimeout(() => this.executeTTTBotMove(), 800);
-          }
-        };
-        optionsBox.appendChild(playBtn);
-        
-      } else if (t.matchStatus === 'playing') {
-        const opp = t.bracket[`round${t.round + 1}`].find(m => m.p1.isUser || m.p2.isUser);
-        const opponent = opp.p1.isUser ? opp.p2 : opp.p1;
-        
-        const turnLimitText = this.state.tttTurnLimit !== 'none'
-          ? `<span id="ttt-turn-timer-badge" style="display:inline-block; margin-left:8px; font-weight:800; color:var(--gold);">⏱️ -- сек</span>`
-          : '';
-
-        textLabel.innerHTML = `
-          <div style="text-align:center; font-size:11px;">
-            <div style="margin-bottom:6px; font-weight:700; color:var(--text-muted);">
-              Матч: <b>Вы ❌</b> vs <b>${opponent.name} ⭕</b> ${turnLimitText}
-            </div>
-            <div style="font-size:12px; color:${t.playerTurn ? 'var(--success)' : 'var(--gold)'}; font-weight:800;">
-              ${t.playerTurn ? '👉 Ваш ход (Крестик)' : `✍️ ${opponent.name} думает...`}
-            </div>
-          </div>
-        `;
-        
-        optionsBox.innerHTML = '';
-        const boardEl = document.createElement('div');
-        boardEl.className = 'ttt-board';
-        
-        t.board.forEach((cell, cellIdx) => {
-          const btn = document.createElement('button');
-          btn.className = `ttt-cell ${cell ? cell.toLowerCase() : ''}`;
-          btn.innerHTML = cell || '';
-          
-          if (cell || !t.playerTurn || t.matchStatus !== 'playing') {
-            btn.disabled = true;
-          } else {
-            btn.onclick = () => this.handleTTTCellClick(cellIdx);
-          }
-          boardEl.appendChild(btn);
-        });
-        optionsBox.appendChild(boardEl);
-        
-        // Запуск/продолжение таймера хода
-        if (this.tttCurrentTurnPlayer !== t.playerTurn) {
-          this.tttCurrentTurnPlayer = t.playerTurn;
-          this.resetTTTTurnTimer();
-        } else {
-          if (this.state.tttTurnLimit !== 'none' && t.playerTurn) {
-            this.updateTTTTimerBadge();
-          }
-        }
-        
-      } else if (t.matchStatus === 'finished') {
-        optionsBox.innerHTML = '';
-        
-        if (t.winner === 'user') {
-          textLabel.innerHTML = `
-            <div style="text-align:center;">
-              <div style="font-size:36px; margin-bottom:10px; animation: pulse 1s infinite;">\ud83c\udfc6</div>
-              <div style="font-size:15px; font-weight:800; color:var(--gold);">\u0412\u042b \u0427\u0415\u041c\u041f\u0418\u041e\u041d \u0422\u0423\u0420\u041d\u0418\u0420\u0410!</div>
-              <div style="font-size:10px; color:var(--text-muted); margin-top:5px; line-height:1.4;">
-                \u0412\u044b \u043e\u0431\u044b\u0433\u0440\u0430\u043b\u0438 \u0432\u0441\u0435\u0445 \u0441\u043e\u043f\u0435\u0440\u043d\u0438\u043a\u043e\u0432 \u0438 \u0437\u0430\u043d\u044f\u043b\u0438 \u043f\u0435\u0440\u0432\u043e\u0435 \u043c\u0435\u0441\u0442\u043e!
-              </div>
-            </div>
-          `;
-        } else {
-          const roundText = roundName === "\u0424\u0438\u043d\u0430\u043b" ? "\u0432 \u0424\u0438\u043d\u0430\u043b\u0435" : `\u0432 ${roundName}`;
-          textLabel.innerHTML = `
-            <div style="text-align:center;">
-              <div style="font-size:36px; margin-bottom:10px; filter: grayscale(1);">\ud83d\udc80</div>
-              <div style="font-size:14px; font-weight:800; color:var(--error);">\u0412\u042b \u0412\u042b\u0411\u042b\u041b\u0418 \u0418\u0417 \u0422\u0423\u0420\u041d\u0418\u0420\u0410</div>
-              <div style="font-size:10px; color:var(--text-muted); margin-top:5px; line-height:1.4;">
-                \u0412\u044b \u043f\u0440\u043e\u0438\u0433\u0440\u0430\u043b\u0438 ${roundText}. \u0422\u043e\u043b\u044c\u043a\u043e \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044c \u0424\u0438\u043d\u0430\u043b\u0430 \u0437\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0433\u043b\u0430\u0432\u043d\u044b\u0439 \u043a\u0443\u0431\u043e\u043a \u0438 \u043f\u0440\u0438\u0437!
-              </div>
-            </div>
-          `;
-          
-          const backBtn = document.createElement('button');
-          backBtn.className = 'btn btn-secondary';
-          backBtn.style.width = '100%';
-          backBtn.style.padding = '12px';
-          backBtn.style.fontWeight = '800';
-          backBtn.innerText = `\ud83d\udd19 \u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0432\u044b\u0431\u043e\u0440\u0443 \u0438\u0433\u0440`;
-          backBtn.onclick = () => this.visitorExitActiveGameToLobby();
-          optionsBox.appendChild(backBtn);
-        }
-      } else if (t.matchStatus === 'waiting') {
-        const roundKey = `round${t.round + 1}`;
-        const matches = t.bracket[roundKey] || [];
-        const userMatchIdx = matches.findIndex(m => m.p1 && m.p1.isUser || m.p2 && m.p2.isUser);
-        const adjacentIdx = userMatchIdx % 2 === 0 ? userMatchIdx + 1 : userMatchIdx - 1;
-        const adjacentMatch = matches[adjacentIdx];
-        
-        const p1Name = adjacentMatch && adjacentMatch.p1 ? `${adjacentMatch.p1.avatar} ${adjacentMatch.p1.name}` : "⏳ Ожидание";
-        const p2Name = adjacentMatch && adjacentMatch.p2 ? `${adjacentMatch.p2.avatar} ${adjacentMatch.p2.name}` : "⏳ Ожидание";
-        const winnerName = adjacentMatch && adjacentMatch.winner ? `${adjacentMatch.winner.avatar} ${adjacentMatch.winner.name}` : null;
-
-        textLabel.innerHTML = `
-          <div style="text-align:center;">
-            <div style="font-size:32px; margin-bottom:10px; animation: pulse 1.5s infinite;">⏳</div>
-            <div style="font-size:13px; font-weight:800; color:var(--gold); text-transform:uppercase;">Ожидание соперника</div>
-            <div style="font-size:10px; color:var(--text-muted); margin-top:6px; line-height:1.4; padding:0 10px;">
-              Вы вышли в следующий раунд! Ждем победителя параллельного матча, чтобы сразиться с ним.
-            </div>
-          </div>
-        `;
-        
-        optionsBox.innerHTML = '';
-        const statusBox = document.createElement('div');
-        statusBox.style.cssText = 'background:rgba(255,255,255,0.02); border:1px solid var(--border-light); border-radius:12px; padding:15px; margin-top:20px; text-align:center; box-sizing:border-box; width:100%;';
-        statusBox.innerHTML = `
-          <div style="font-size:9px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:10px;">Параллельный матч (${roundName}):</div>
-          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#fff;">
-            <span>${p1Name}</span>
-            <span style="color:var(--primary); font-size:10px; font-weight:800;">VS</span>
-            <span>${p2Name}</span>
-          </div>
-          <div style="margin-top:12px; font-size:10px; color:var(--gold); font-weight:600; animation: ${winnerName ? 'none' : 'pulse 1.2s infinite'};">
-            ${winnerName ? `Победитель: ${winnerName} 🎉` : 'Идет напряженная игра... ⚔️'}
-          </div>
-        `;
-        optionsBox.appendChild(statusBox);
-      }
-      
-      this.renderSimulatedPlayersList();
-      
+      if (typeLabel) typeLabel.innerText = 'КРЕСТИКИ-НОЛИКИ ❌⭕';
+      this.renderTTFBoard(optionsBox, textLabel);
+      return;
     } else {
       document.getElementById('visitor-game-q-index').innerText = `\u0418\u0433\u0440\u0430: ${gameName}`;
       
