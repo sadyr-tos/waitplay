@@ -358,9 +358,11 @@ class WaitPlayApp {
           s.style.display = 'flex';
         });
 
-        if (this.state.email && this.state.consentAccepted) {
+        if (this.state.consentAccepted || this.state.email) {
+          if (!this.state.activeBranchId) this.state.activeBranchId = 'br_main';
+          if (!this.state.activeBranchName) this.state.activeBranchName = 'Моё заведение 🎮';
           this.setAdminPanelActiveView('dashboard');
-          this.renderAdminDashboard();
+          this.updateAdminView();
         } else {
           this.setAdminPanelActiveView('welcome-choice');
         }
@@ -2887,20 +2889,10 @@ class WaitPlayApp {
 
   // --- STEPPED REGISTRATION WORKFLOW ---
   consentAccept() {
-    const checkbox = document.getElementById('consent-agreement-checkbox');
-    const container = document.getElementById('consent-checkbox-lbl');
-    if (checkbox && !checkbox.checked) {
-      if (container) container.classList.add('error');
-      this.showToast("Пожалуйста, подтвердите согласие с правилами!", true);
-      setTimeout(() => container && container.classList.remove('error'), 500);
-      return;
-    }
     this.state.consentAccepted = true;
-    
-    // Auto-initialize active space context
     if (!this.state.activeBranchId || !this.state.activeBranchName) {
       this.state.activeBranchId = 'br_main';
-      this.state.activeBranchName = 'Игровое пространство 🎮';
+      this.state.activeBranchName = 'Моё заведение 🎮';
     }
     if (!this.state.email) {
       this.state.email = 'owner@waitplay.app';
@@ -3527,36 +3519,6 @@ class WaitPlayApp {
   setAdminPanelActiveView(viewId) {
     let finalViewId = viewId;
     
-    // Check if we need to show B2B ad based on 1-hour global and branch-specific cooldowns
-    const isPro = this.state.subscription && this.state.subscription.includes('pro');
-    const hasActiveBranch = !!(this.state.activeBranchId);
-    const now = Date.now();
-    const lastAd = this.state.lastAdTime || 0;
-    // 30 minutes (1800000 ms) in testing mode, 1 hour (3600000 ms) in live mode
-    const cooldownPeriod = this.state.manualTestingMode ? 1800000 : 3600000;
-
-    if (viewId === 'dashboard' && hasActiveBranch && !isPro && (now - lastAd >= cooldownPeriod)) {
-      let branchCooldownPassed = true;
-      this.state.databaseClients = this.state.databaseClients || [];
-      const client = this.state.databaseClients.find(c => c.email && c.email.toLowerCase() === this.state.email.toLowerCase());
-      if (client && client.branches) {
-        const br = client.branches.find(b => b.id === this.state.activeBranchId);
-        if (br) {
-          const brLastAd = br.lastAdTime || 0;
-          if (now - brLastAd < cooldownPeriod) {
-            branchCooldownPassed = false;
-          }
-        }
-      }
-
-      if (branchCooldownPassed) {
-        this.triggerMockAd(() => {
-          this.setAdminPanelActiveView('dashboard');
-        });
-        return;
-      }
-    }
-
     const isUserBanned = this.checkBannedStatus();
     const isMaintenance = this.state.maintenanceMode === true;
     
@@ -3566,19 +3528,20 @@ class WaitPlayApp {
       finalViewId = 'maintenance';
     }
 
-    const panels = [
-      'welcome-choice', 'consent', 'reg-email', 'reg-phone', 
-      'select-branch', 'add-branch', 'payment', 
-      'dashboard', 'edit-quiz', 'migration', 'banned', 'maintenance', 'edit-ttt', 'edit-memory', 'edit-differences', 'edit-crossword', 'edit-guessword', 'edit-checkers', 'edit-stickmanrace', 'edit-slicing'
-    ];
-    panels.forEach(p => {
-      const el = document.getElementById(`admin-${p}-panel`);
-      if (el) {
-        const isActive = (p === finalViewId);
-        el.classList.toggle('active', isActive);
-        el.style.display = isActive ? 'flex' : 'none';
+    const adminContainer = document.querySelector('.screen:not(.visitor-screen)');
+    if (adminContainer) {
+      const allAdminPanels = adminContainer.querySelectorAll('.view-panel');
+      allAdminPanels.forEach(p => {
+        p.classList.remove('active');
+        p.style.display = 'none';
+      });
+
+      const targetPanel = document.getElementById(`admin-${finalViewId}-panel`);
+      if (targetPanel) {
+        targetPanel.classList.add('active');
+        targetPanel.style.display = 'flex';
       }
-    });
+    }
 
     if (viewId !== 'payment') {
       const backBtn = document.getElementById('btn-payment-back');
@@ -3587,6 +3550,7 @@ class WaitPlayApp {
       if (warningBox) warningBox.style.display = 'none';
     }
   }
+
   showToast(message, isError = false) {
     const el = document.getElementById('admin-toast');
     if (!el) return;
