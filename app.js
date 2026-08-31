@@ -6611,404 +6611,7 @@ class WaitPlayApp {
     this.renderActiveGameQuestion();
   }
 
-  initTTFTournament() {
-    const branch = this.getVisitorConnectedBranch();
-    const size = branch && branch.tttTournamentSize ? branch.tttTournamentSize : this.state.tttTournamentSize;
-    const diff = branch && branch.tttDifficulty ? branch.tttDifficulty : this.state.tttDifficulty;
-    
-    const botPoolNames = ["Панда", "Лиса", "Медведь", "Тигр", "Лев", "Зайка", "Обезьянка", "Коала", "Лягушка", "Котёнок", "Щенок", "Цыплёнок", "Барсук", "Волк", "Кабан", "Ёжик"];
-    const botPoolEmojis = ["🐼", "🦊", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔", "🦡", "🐺", "🐗", "🦔"];
-    
-    const shuffled = [];
-    for (let i = 0; i < botPoolNames.length; i++) {
-      shuffled.push({ name: botPoolNames[i], avatar: botPoolEmojis[i] });
-    }
-    shuffled.sort(() => Math.random() - 0.5);
-    
-    const countNeeded = size - 1;
-    const tournamentBots = shuffled.slice(0, countNeeded);
-    
-    const round1Matches = [];
-    round1Matches.push({ p1: { name: "Вы", avatar: "👨‍💻", isUser: true }, p2: tournamentBots[0], winner: null });
-    
-    for (let i = 1; i < size / 2; i++) {
-      round1Matches.push({ p1: tournamentBots[i * 2 - 1], p2: tournamentBots[i * 2], winner: null });
-    }
-    
-    const roundsCount = Math.log2(size);
-    const bracket = {
-      round1: round1Matches
-    };
-    for (let r = 2; r <= roundsCount; r++) {
-      const matchCount = size / Math.pow(2, r);
-      bracket[`round${r}`] = [];
-      for (let m = 0; m < matchCount; m++) {
-        bracket[`round${r}`].push({ p1: null, p2: null, winner: null });
-      }
-    }
-    
-    this.state.tttTournament = {
-      size: size,
-      round: 0,
-      bracket: bracket,
-      currentMatch: null,
-      board: Array(9).fill(null),
-      playerTurn: true,
-      matchStatus: 'bracket',
-      difficulty: diff,
-      isUserActive: true
-    };
-    
-    this.simulateBotMatchesForCurrentRound();
-    this.renderActiveGameQuestion();
-  }
-
-  simulateBotMatchesForCurrentRound() {
-    const t = this.state.tttTournament;
-    if (!t) return;
-    const roundKey = `round${t.round + 1}`;
-    const matches = t.bracket[roundKey];
-    if (!matches) return;
-    
-    // Находим индекс матча пользователя
-    const userMatchIdx = matches.findIndex(m => m.p1 && m.p1.isUser || m.p2 && m.p2.isUser);
-    const adjacentIdx = userMatchIdx % 2 === 0 ? userMatchIdx + 1 : userMatchIdx - 1;
-    
-    matches.forEach((m, idx) => {
-      // Моментально симулируем все матчи ботов, кроме параллельного матча, который ждет пользователь
-      if (idx !== userMatchIdx && idx !== adjacentIdx && !m.winner && m.p1 && m.p2) {
-        m.winner = Math.random() > 0.5 ? m.p1 : m.p2;
-      }
-    });
-  }
-
-  runTournamentWaitingSimulation() {
-    const t = this.state.tttTournament;
-    if (!t) return;
-    
-    const roundKey = `round${t.round + 1}`;
-    const matches = t.bracket[roundKey] || [];
-    
-    // Находим параллельный матч в паре с пользователем
-    const userMatchIdx = matches.findIndex(m => m.p1 && m.p1.isUser || m.p2 && m.p2.isUser);
-    const adjacentIdx = userMatchIdx % 2 === 0 ? userMatchIdx + 1 : userMatchIdx - 1;
-    const adjacentMatch = matches[adjacentIdx];
-    
-    if (adjacentMatch && adjacentMatch.winner === null) {
-      // Ждем 3.5 секунды, затем завершаем именно этот параллельный матч
-      setTimeout(() => {
-        adjacentMatch.winner = Math.random() > 0.5 ? adjacentMatch.p1 : adjacentMatch.p2;
-        this.playAudioTone('click');
-        this.renderActiveGameQuestion();
-        
-        // Ждем еще 1.5 секунды, проигрываем фанфары и продвигаем пользователя в следующий круг
-        setTimeout(() => {
-          this.playAudioTone('success');
-          setTimeout(() => {
-            t.round++;
-            const prevMatches = t.bracket[`round${t.round}`];
-            const nextMatches = t.bracket[`round${t.round + 1}`];
-            if (nextMatches) {
-              for (let i = 0; i < nextMatches.length; i++) {
-                nextMatches[i].p1 = prevMatches[i * 2].winner;
-                nextMatches[i].p2 = prevMatches[i * 2 + 1].winner;
-                nextMatches[i].winner = null;
-              }
-            }
-            
-            this.simulateBotMatchesForCurrentRound();
-            t.matchStatus = 'bracket';
-            document.getElementById('visitor-game-score').innerText = `Раунд: ${t.round + 1}`;
-            this.renderActiveGameQuestion();
-          }, 1000);
-        }, 1500);
-      }, 3500);
-    } else {
-      // Если параллельного матча нет или он уже решен, сразу переходим к следующему раунду
-      t.round++;
-      const prevMatches = t.bracket[`round${t.round}`];
-      const nextMatches = t.bracket[`round${t.round + 1}`];
-      if (nextMatches) {
-        for (let i = 0; i < nextMatches.length; i++) {
-          nextMatches[i].p1 = prevMatches[i * 2].winner;
-          nextMatches[i].p2 = prevMatches[i * 2 + 1].winner;
-          nextMatches[i].winner = null;
-        }
-        this.simulateBotMatchesForCurrentRound();
-        t.matchStatus = 'bracket';
-        document.getElementById('visitor-game-score').innerText = `Раунд: ${t.round + 1}`;
-      }
-      this.renderActiveGameQuestion();
-    }
-  }
-
-  clearTTTTurnTimer() {
-    if (this.tttTurnTimerInterval) {
-      clearInterval(this.tttTurnTimerInterval);
-      this.tttTurnTimerInterval = null;
-    }
-    this.tttCurrentTurnPlayer = null;
-  }
-
-  resetTTTTurnTimer() {
-    this.clearTTTTurnTimer();
-    
-    const t = this.state.tttTournament;
-    if (!t || t.matchStatus !== 'playing' || !t.playerTurn) return;
-    
-    const limitVal = this.state.tttTurnLimit || 'none';
-    if (limitVal === 'none') return;
-    
-    const limit = parseInt(limitVal);
-    if (isNaN(limit)) return;
-    
-    this.state.tttRemainingSeconds = limit;
-    this.updateTTTTimerBadge();
-    
-    this.tttTurnTimerInterval = setInterval(() => {
-      this.state.tttRemainingSeconds--;
-      this.updateTTTTimerBadge();
-      
-      if (this.state.tttRemainingSeconds <= 0) {
-        this.clearTTTTurnTimer();
-        this.handleTTTTurnTimeout();
-      }
-    }, 1000);
-  }
-
-  updateTTTTimerBadge() {
-    const el = document.getElementById('ttt-turn-timer-badge');
-    if (el) {
-      el.innerText = `⏱️ ${this.state.tttRemainingSeconds} сек`;
-      if (this.state.tttRemainingSeconds <= 3) {
-        el.style.color = 'var(--error)';
-      } else {
-        el.style.color = 'var(--gold)';
-      }
-    }
-  }
-
-  handleTTTTurnTimeout() {
-    const t = this.state.tttTournament;
-    if (!t || t.matchStatus !== 'playing' || !t.playerTurn) return;
-    
-    this.showVisitorToast("⌛ Время вышло! Сделан случайный ход.", true);
-    this.playAudioTone('incorrect');
-    
-    const emptyCells = [];
-    t.board.forEach((cell, idx) => {
-      if (cell === null) emptyCells.push(idx);
-    });
-    
-    if (emptyCells.length > 0) {
-      const randomIdx = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-      t.board[randomIdx] = 'X';
-      this.renderActiveGameQuestion();
-      
-      const outcome = this.checkTTTBoardState(t.board);
-      if (outcome === 'X') {
-        setTimeout(() => this.handleTTTMatchEnd('user'), 600);
-        return;
-      } else if (outcome === 'draw') {
-        setTimeout(() => this.handleTTTMatchEnd('draw'), 600);
-        return;
-      }
-      
-      t.playerTurn = false;
-      this.renderActiveGameQuestion();
-      setTimeout(() => this.executeTTTBotMove(), 800);
-    }
-  }
-
-  handleTTTCellClick(cellIdx) {
-    const t = this.state.tttTournament;
-    if (!t || t.matchStatus !== 'playing' || !t.playerTurn || t.board[cellIdx]) return;
-    
-    t.board[cellIdx] = 'X';
-    this.playAudioTone('correct');
-    this.renderActiveGameQuestion();
-    
-    const outcome = this.checkTTTBoardState(t.board);
-    if (outcome === 'X') {
-      setTimeout(() => this.handleTTTMatchEnd('user'), 600);
-      return;
-    } else if (outcome === 'draw') {
-      setTimeout(() => this.handleTTTMatchEnd('draw'), 600);
-      return;
-    }
-    
-    t.playerTurn = false;
-    this.renderActiveGameQuestion();
-    
-    setTimeout(() => {
-      this.executeTTTBotMove();
-    }, 800);
-  }
-
-  executeTTTBotMove() {
-    const t = this.state.tttTournament;
-    if (!t || t.matchStatus !== 'playing' || t.playerTurn) return;
-    
-    const board = t.board;
-    const emptyIndices = [];
-    board.forEach((cell, idx) => {
-      if (!cell) emptyIndices.push(idx);
-    });
-    
-    if (emptyIndices.length === 0) return;
-    
-    let botMoveIdx = -1;
-    const diff = t.difficulty || 'normal';
-    
-    const findWinningMove = (player) => {
-      const winLines = [
-        [0, 1, 2], [3, 4, 5], [6, 7, 8],
-        [0, 3, 6], [1, 4, 7], [2, 5, 8],
-        [0, 4, 8], [2, 4, 6]
-      ];
-      for (let line of winLines) {
-        const [a, b, c] = line;
-        if (board[a] === player && board[b] === player && !board[c]) return c;
-        if (board[a] === player && board[c] === player && !board[b]) return b;
-        if (board[b] === player && board[c] === player && !board[a]) return a;
-      }
-      return -1;
-    };
-
-    const decideMove = () => {
-      const winIdx = findWinningMove('O');
-      if (winIdx !== -1) return winIdx;
-      
-      const blockIdx = findWinningMove('X');
-      if (blockIdx !== -1) return blockIdx;
-      
-      if (!board[4]) return 4;
-      
-      const corners = [0, 2, 6, 8].filter(c => !board[c]);
-      if (corners.length > 0) {
-        return corners[Math.floor(Math.random() * corners.length)];
-      }
-      
-      return emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-    };
-
-    if (diff === 'hard') {
-      botMoveIdx = decideMove();
-    } else if (diff === 'normal') {
-      if (Math.random() < 0.70) {
-        botMoveIdx = decideMove();
-      } else {
-        botMoveIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-      }
-    } else {
-      if (Math.random() < 0.30) {
-        botMoveIdx = decideMove();
-      } else {
-        botMoveIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-      }
-    }
-    
-    if (botMoveIdx === -1 || board[botMoveIdx]) {
-      botMoveIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-    }
-    
-    board[botMoveIdx] = 'O';
-    this.playAudioTone('incorrect');
-    this.renderActiveGameQuestion();
-    
-    const outcome = this.checkTTTBoardState(board);
-    if (outcome === 'O') {
-      setTimeout(() => this.handleTTTMatchEnd('bot'), 600);
-      return;
-    } else if (outcome === 'draw') {
-      setTimeout(() => this.handleTTTMatchEnd('draw'), 600);
-      return;
-    }
-    
-    t.playerTurn = true;
-    this.renderActiveGameQuestion();
-  }
-
-  checkTTTBoardState(board) {
-    const winLines = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8],
-      [0, 3, 6], [1, 4, 7], [2, 5, 8],
-      [0, 4, 8], [2, 4, 6]
-    ];
-    for (let line of winLines) {
-      const [a, b, c] = line;
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return board[a];
-      }
-    }
-    if (board.every(cell => cell !== null)) return 'draw';
-    return null;
-  }
-
-  handleTTTMatchEnd(winner) {
-    this.clearTTTTurnTimer();
-    const t = this.state.tttTournament;
-    if (!t) return;
-    
-    const roundKey = `round${t.round + 1}`;
-    const match = t.bracket[roundKey].find(m => m.p1 && m.p1.isUser || m.p2 && m.p2.isUser);
-    
-    if (winner === 'draw') {
-      t.currentDrawCount = (t.currentDrawCount || 0) + 1;
-      const maxDraws = parseInt(this.state.tttMaxDraws) || 3;
-      if (t.currentDrawCount >= maxDraws) {
-        t.currentDrawCount = 0;
-        this.showVisitorToast("🤝 Лимит ничьих исчерпан! Победитель определен случайно.", true);
-        const resolvedWinner = Math.random() > 0.5 ? 'user' : 'bot';
-        setTimeout(() => this.handleTTTMatchEnd(resolvedWinner), 1000);
-        return;
-      }
-
-      this.showVisitorToast(`🤝 Ничья! Переигрываем матч... (Ничья ${t.currentDrawCount})`, false);
-      setTimeout(() => {
-        t.board.fill(null);
-        t.playerTurn = Math.random() > 0.5;
-        this.renderActiveGameQuestion();
-        if (!t.playerTurn) {
-          setTimeout(() => this.executeTTTBotMove(), 800);
-        }
-      }, 1500);
-      return;
-    }
-    
-    t.currentDrawCount = 0;
-    
-    if (winner === 'user') {
-      match.winner = match.p1;
-      this.showVisitorToast("🎉 Победа! Вы вышли в следующий раунд!", false);
-      
-      const roundsCount = Math.log2(t.size);
-      if (t.round + 1 === roundsCount) {
-        t.matchStatus = 'finished';
-        t.winner = 'user';
-        this.renderActiveGameQuestion();
-        
-        setTimeout(() => {
-          this.state.activeGameScore = 100;
-          this.finishVisitorGame();
-        }, 2000);
-      } else {
-        setTimeout(() => {
-          t.matchStatus = 'waiting';
-          this.renderActiveGameQuestion();
-          this.runTournamentWaitingSimulation();
-        }, 1500);
-      }
-    } else {
-      match.winner = match.p2;
-      t.isUserActive = false;
-      t.matchStatus = 'finished';
-      this.showVisitorToast(`😢 Вы проиграли и выбыли из турнира!`, true);
-      this.renderActiveGameQuestion();
-    }
-  }
-
-  initTTFTournament(isNextRound = false) {
+initTTFTournament(isNextRound = false) {
     this.ensureMyPlayerProfile();
 
     let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
@@ -7019,52 +6622,42 @@ class WaitPlayApp {
     let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
     if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
 
-    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+
+    let isHost = true;
+    let mySymbol = 'X';
+    let oppSymbol = 'O';
+    let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
+    let oppName = '⏳ Ожидание игрока 2...';
+    let status = 'waiting';
 
     if (otherPlayers.length > 0) {
-      const host = otherPlayers[0];
-      this.state.tttTournament = {
-        round: currentRound,
-        scoreX: scoreX,
-        scoreO: scoreO,
-        drawsCount: drawsCount,
-        isHost: false,
-        mySymbol: 'O',
-        oppSymbol: 'X',
-        myName: `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`,
-        oppName: `${host.avatar || '👤'} ${host.name || 'Игрок 1'}`,
-        board: Array(9).fill(null),
-        currentTurn: 'X',
-        status: 'playing',
-        winner: null
-      };
+      const other = otherPlayers[0];
+      // Deterministic host election based on ID comparison
+      if (this.myPlayerId > other.id) {
+        isHost = false;
+        mySymbol = 'O';
+        oppSymbol = 'X';
+        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 1'}`;
+        status = 'playing';
+      } else {
+        isHost = true;
+        mySymbol = 'X';
+        oppSymbol = 'O';
+        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
+        status = 'playing';
+      }
 
       this.sendNetworkMessage({
         type: 'ttt_paired',
         gameId: 4,
-        hostId: host.id,
-        hostProfile: host,
-        guestId: this.myPlayerId,
-        guestProfile: this.myPlayerProfile,
+        hostId: (isHost ? this.myPlayerId : other.id),
+        hostProfile: (isHost ? this.myPlayerProfile : other),
+        guestId: (isHost ? other.id : this.myPlayerId),
+        guestProfile: (isHost ? other : this.myPlayerProfile),
         round: currentRound
       });
     } else {
-      this.state.tttTournament = {
-        round: currentRound,
-        scoreX: scoreX,
-        scoreO: scoreO,
-        drawsCount: drawsCount,
-        isHost: true,
-        mySymbol: 'X',
-        oppSymbol: 'O',
-        myName: `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`,
-        oppName: '⏳ Ожидание игрока 2...',
-        board: Array(9).fill(null),
-        currentTurn: 'X',
-        status: 'waiting',
-        winner: null
-      };
-
       this.sendNetworkMessage({
         type: 'ttt_join',
         gameId: 4,
@@ -7072,17 +6665,30 @@ class WaitPlayApp {
       });
     }
 
+    this.state.tttTournament = {
+      round: currentRound,
+      scoreX: scoreX,
+      scoreO: scoreO,
+      drawsCount: drawsCount,
+      isHost: isHost,
+      mySymbol: mySymbol,
+      oppSymbol: oppSymbol,
+      myName: myName,
+      oppName: oppName,
+      board: Array(9).fill(null),
+      status: status,
+      winner: null
+    };
+
     const scoreEl = document.getElementById('visitor-game-score');
-    if (scoreEl) {
-      scoreEl.innerText = `Раунд: ${currentRound}`;
-    }
+    if (scoreEl) scoreEl.innerText = `Раунд: ${currentRound}`;
 
     this.renderActiveGameQuestion();
   }
 
   handleRemoteTTFJoin(data) {
     const t = this.state.tttTournament;
-    if (!t || !t.isHost) return;
+    if (!t) return;
 
     const guest = data.profile || { name: 'Игрок 2', avatar: '🐺', id: data.senderId };
     t.oppName = `${guest.avatar} ${guest.name}`;
@@ -7099,9 +6705,6 @@ class WaitPlayApp {
     });
 
     this.renderActiveGameQuestion();
-    if (t.currentTurn === t.mySymbol) {
-      this.startLiveTTFTurnTimer();
-    }
   }
 
   handleRemoteTTFPaired(data) {
@@ -7115,7 +6718,6 @@ class WaitPlayApp {
       t.myName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
       t.oppName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
       t.status = 'playing';
-      t.currentTurn = 'X';
     } else if (this.myPlayerId === data.guestId) {
       t.isHost = false;
       t.mySymbol = 'O';
@@ -7123,15 +6725,9 @@ class WaitPlayApp {
       t.myName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
       t.oppName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
       t.status = 'playing';
-      t.currentTurn = 'X';
     }
 
     this.renderActiveGameQuestion();
-    if (t.currentTurn === t.mySymbol) {
-      this.startLiveTTFTurnTimer();
-    } else {
-      this.clearLiveTTFTurnTimer();
-    }
   }
 
   renderTTFBoard(optionsBox, textLabel) {
@@ -7141,16 +6737,24 @@ class WaitPlayApp {
       return;
     }
 
+    // Determine whose turn it is mathematically by counting symbols on board
+    let countX = 0, countO = 0;
+    t.board.forEach(cell => {
+      if (cell === 'X') countX++;
+      if (cell === 'O') countO++;
+    });
+
+    const activeSymbol = (countX === countO) ? 'X' : 'O';
     const isWaiting = (t.status === 'waiting');
-    const isMyTurn = (!isWaiting && t.currentTurn === t.mySymbol && !t.winner);
-    
+    const isMyTurn = (!isWaiting && !t.winner && activeSymbol === t.mySymbol);
+
     let turnIndicator = '';
     if (isWaiting) {
       turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">⏳ Ожидание второго живого игрока...</span>`;
     } else if (t.winner) {
       turnIndicator = '';
     } else if (isMyTurn) {
-      turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:13px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
+      turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:14px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
     } else {
       turnIndicator = `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`;
     }
@@ -7162,12 +6766,12 @@ class WaitPlayApp {
         <div style="text-align:center;">
           <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:3px;">🎮 КРЕСТИКИ-НОЛИКИ (РАУНД ${t.round})</div>
           <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:4px;">
-            <span>${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="${t.mySymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
             <span style="color:var(--gold); font-size:11px;">VS</span>
-            <span>${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="${t.oppSymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
           </div>
-          <div style="font-size:10px; color:var(--text-muted); margin-bottom:4px;">${scoreLine}</div>
-          <div>${turnIndicator} <span id="live-ttf-turn-timer-badge" style="font-size:12px; font-weight:800; color:var(--gold); margin-left:6px;"></span></div>
+          <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">${scoreLine}</div>
+          <div style="min-height:22px;">${turnIndicator}</div>
         </div>
       `;
     }
@@ -7189,17 +6793,21 @@ class WaitPlayApp {
           btn.innerText = '❌';
           btn.style.borderColor = 'var(--primary)';
           btn.style.background = 'rgba(139, 92, 246, 0.15)';
+          btn.disabled = true;
         } else if (cell === 'O') {
           btn.innerText = '⭕';
           btn.style.borderColor = 'var(--gold)';
           btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          btn.disabled = true;
         } else {
           btn.innerText = '';
           if (isMyTurn) {
             btn.onclick = () => this.handleLiveTTFCellClick(i);
+            btn.style.borderColor = 'rgba(139, 92, 246, 0.5)';
           } else {
             btn.style.cursor = 'not-allowed';
             btn.style.opacity = '0.6';
+            btn.disabled = true;
           }
         }
         optionsBox.appendChild(btn);
@@ -7207,66 +6815,19 @@ class WaitPlayApp {
     }
   }
 
-  startLiveTTFTurnTimer() {
-    this.clearLiveTTFTurnTimer();
-    const limit = this.state.tttTurnLimit || 'none';
-    if (limit === 'none') return;
-    
-    const seconds = parseInt(limit) || 10;
-    this.liveTTFSecondsLeft = seconds;
-    this.updateLiveTTFTimerUI();
-    
-    this.liveTTFTimerInterval = setInterval(() => {
-      this.liveTTFSecondsLeft--;
-      this.updateLiveTTFTimerUI();
-      
-      if (this.liveTTFSecondsLeft <= 0) {
-        this.clearLiveTTFTurnTimer();
-        this.handleLiveTTFTimeout();
-      }
-    }, 1000);
-  }
-
-  clearLiveTTFTurnTimer() {
-    if (this.liveTTFTimerInterval) {
-      clearInterval(this.liveTTFTimerInterval);
-      this.liveTTFTimerInterval = null;
-    }
-  }
-
-  updateLiveTTFTimerUI() {
-    const el = document.getElementById('live-ttf-turn-timer-badge');
-    if (el) {
-      el.innerText = `⏱️ ${this.liveTTFSecondsLeft} сек`;
-      el.style.color = (this.liveTTFSecondsLeft <= 3) ? 'var(--error)' : 'var(--gold)';
-    }
-  }
-
-  handleLiveTTFTimeout() {
-    const t = this.state.tttTournament;
-    if (!t || t.winner || t.currentTurn !== t.mySymbol) return;
-
-    this.showVisitorToast("⌛ Время на ход вышло! Сделан случайный ход.", true);
-    this.playAudioTone('incorrect');
-
-    const emptyCells = [];
-    t.board.forEach((cell, idx) => {
-      if (cell === null) emptyCells.push(idx);
-    });
-
-    if (emptyCells.length > 0) {
-      const chosen = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-      this.handleLiveTTFCellClick(chosen);
-    }
-  }
-
   handleLiveTTFCellClick(index) {
     const t = this.state.tttTournament;
-    if (!t || t.board[index] !== null || t.currentTurn !== t.mySymbol || t.winner || t.status !== 'playing') return;
+    if (!t || t.board[index] !== null || t.winner || t.status !== 'playing') return;
 
-    this.clearLiveTTFTurnTimer();
+    let countX = 0, countO = 0;
+    t.board.forEach(cell => {
+      if (cell === 'X') countX++;
+      if (cell === 'O') countO++;
+    });
+    const activeSymbol = (countX === countO) ? 'X' : 'O';
+    if (activeSymbol !== t.mySymbol) return;
+
     t.board[index] = t.mySymbol;
-    t.currentTurn = (t.mySymbol === 'X') ? 'O' : 'X';
     this.playAudioTone('click');
 
     this.sendNetworkMessage({
@@ -7274,7 +6835,7 @@ class WaitPlayApp {
       gameId: 4,
       cellIndex: index,
       symbol: t.mySymbol,
-      nextTurn: t.currentTurn
+      board: t.board
     });
 
     const winner = this.checkTTFWinner(t.board);
@@ -7296,9 +6857,11 @@ class WaitPlayApp {
     const t = this.state.tttTournament;
     if (!t || data.gameId !== 4) return;
 
-    this.clearLiveTTFTurnTimer();
-    t.board[data.cellIndex] = data.symbol;
-    t.currentTurn = data.nextTurn;
+    if (Array.isArray(data.board)) {
+      t.board = [...data.board];
+    } else {
+      t.board[data.cellIndex] = data.symbol;
+    }
     this.playAudioTone('click');
 
     const winner = this.checkTTFWinner(t.board);
@@ -7313,9 +6876,6 @@ class WaitPlayApp {
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
-      if (t.currentTurn === t.mySymbol) {
-        this.startLiveTTFTurnTimer();
-      }
     }
   }
 
@@ -7340,7 +6900,6 @@ class WaitPlayApp {
   }
 
   finishTTFMatch(result) {
-    this.clearLiveTTFTurnTimer();
     const textLabel = document.getElementById('visitor-game-question-text');
     const optionsBox = document.getElementById('visitor-game-options-container');
     const t = this.state.tttTournament;
@@ -7391,7 +6950,7 @@ class WaitPlayApp {
     this.initTTFTournament(true);
   }
 
-  renderActiveGameQuestion() {
+    renderActiveGameQuestion() {
     const qIndex = this.state.activeGameQIndex;
     const gameId = this.state.visitorSelectedGameId;
     const game = this.state.games.find(g => g.id === gameId);
