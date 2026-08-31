@@ -6124,11 +6124,13 @@ class WaitPlayApp {
     }
   }
 
-  cleanStaleNetworkPlayers() {
+    cleanStaleNetworkPlayers() {
     const now = Date.now();
     let changed = false;
+    
+    // Purge dead corridor presence
     for (const [id, player] of Object.entries(this.livePlayers || {})) {
-      if (id !== this.myPlayerId && now - player.lastSeen > 6000) {
+      if (id !== this.myPlayerId && now - (player.lastSeen || 0) > 3500) {
         delete this.livePlayers[id];
         if (this.queuePlayers && this.queuePlayers[id]) {
           delete this.queuePlayers[id];
@@ -6136,6 +6138,18 @@ class WaitPlayApp {
         changed = true;
       }
     }
+
+    // Purge dead queue entries
+    for (const [id, qp] of Object.entries(this.queuePlayers || {})) {
+      if (id !== this.myPlayerId) {
+        const lp = this.livePlayers && this.livePlayers[id];
+        if (!lp || now - (lp.lastSeen || 0) > 3500) {
+          delete this.queuePlayers[id];
+          changed = true;
+        }
+      }
+    }
+
     if (changed) {
       this.updateLivePlayersCorridorUI();
       this.updateLiveQueueUI();
@@ -6247,7 +6261,7 @@ class WaitPlayApp {
     });
   }
 
-  visitorJoinLobby(gameId) {
+    visitorJoinLobby(gameId) {
     try {
       this.ensureMyPlayerProfile();
       
@@ -6262,7 +6276,7 @@ class WaitPlayApp {
 
       const activeOpponentsInGame = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && p.gameId === gameId);
       if (activeOpponentsInGame.length >= 2 && this.roomStatus && this.roomStatus[gameId] && this.roomStatus[gameId].busy) {
-        this.showVisitorToast(`🔒 Комната занята! Идет активный раунд (${this.roomStatus[gameId].players || 'игроков'}). Подождите окончания.`, true);
+        this.showVisitorToast("🔒 Комната занята! Идет активный раунд. Подождите окончания.", true);
         return;
       }
       
@@ -6270,6 +6284,15 @@ class WaitPlayApp {
       this.myQueueJoinTime = Date.now();
       this.saveState();
       
+      // Wipe any stale queue cache
+      this.queuePlayers = {};
+      this.queuePlayers[this.myPlayerId] = {
+        ...this.myPlayerProfile,
+        id: this.myPlayerId,
+        gameId: gameId,
+        lastSeen: Date.now()
+      };
+
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
         overlay.style.display = 'flex';
@@ -6284,14 +6307,6 @@ class WaitPlayApp {
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
       }
-
-      this.queuePlayers = this.queuePlayers || {};
-      this.queuePlayers[this.myPlayerId] = {
-        ...this.myPlayerProfile,
-        id: this.myPlayerId,
-        gameId: gameId,
-        joinTime: this.myQueueJoinTime
-      };
 
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
@@ -6310,15 +6325,11 @@ class WaitPlayApp {
         const timerEl = document.getElementById('lobby-countdown-timer');
         if (timerEl) timerEl.innerText = `${this.state.lobbyTimerVal} сек`;
 
-        this.checkInstantQueuePairing(gameId);
-
         if (this.state.lobbyTimerVal <= 0) {
           clearInterval(this.state.lobbyCountdown);
           this.finishQueueMatchmaking(gameId);
         }
       }, 1000);
-
-      this.checkInstantQueuePairing(gameId);
     } catch(e) {
       console.error("Error in visitorJoinLobby:", e);
     }
@@ -6373,90 +6384,32 @@ class WaitPlayApp {
     }
   }
 
-  finishQueueMatchmaking(gameId) {
-    const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
-    const count = inQueue.length;
+    finishQueueMatchmaking(gameId) {
+    try {
+      const overlay = document.getElementById('lobby-queue-overlay');
+      const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
+      const totalLiveInQueue = inQueue.length;
 
-    if (count < 2) {
-      this.showQueueFailureModal("Недостаточно игроков", "За 15 секунд в комнату зашел только 1 человек. Для игры требуется минимум 2 живых игрока.");
-      return;
+      if (totalLiveInQueue < 2) {
+        if (overlay) {
+          overlay.innerHTML = `
+            <div style="font-size:36px; margin-bottom:10px;">⚠️</div>
+            <h3 style="color:#fff; margin-bottom:6px;">Недостаточно игроков</h3>
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:15px;">Для игры нужно минимум 2 игрока (набралось: ${totalLiveInQueue}).</p>
+            <button class="btn btn-primary" style="padding:8px 18px; font-size:12px;" onclick="app.visitorLeaveQueue()">Закрыть ✖</button>
+          `;
+        }
+        return;
+      }
+
+      if (overlay) {
+        overlay.style.display = 'none';
+      }
+
+      this.startActiveGame(totalLiveInQueue);
+    } catch(e) {
+      console.error("Error in finishQueueMatchmaking:", e);
     }
-
-    inQueue.sort((a, b) => (a.joinTime || 0) - (b.joinTime || 0));
-
-    const myIndex = inQueue.findIndex(p => p.id === this.myPlayerId);
-    const evenPairedCount = Math.floor(count / 2) * 2;
-
-    if (myIndex >= evenPairedCount) {
-      this.showQueueFailureModal("Пара не найдена", "В комнату зашло нечетное число участников. Первые игроки начали матч, вы будете первыми в очереди на следующий раунд!");
-      return;
-    }
-
-    this.sendNetworkMessage({
-      type: 'room_busy',
-      gameId: gameId,
-      busy: true,
-      players: `${inQueue[0].name} vs ${inQueue[1].name}`
-    });
-
-    const overlay = document.getElementById('lobby-queue-overlay');
-    if (overlay) overlay.style.display = 'none';
-
-    this.startActiveGame(2);
-  }
-
-  showQueueFailureModal(title, message) {
-    this.isPairingStarting = false;
-    const overlay = document.getElementById('lobby-queue-overlay');
-    if (overlay) {
-      overlay.innerHTML = `
-        <div style="background:var(--card-bg, #18142c); border:1px solid var(--border-light); border-radius:18px; padding:25px; max-width:320px; width:90%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); position:relative;">
-          <button onclick="app.visitorLeaveQueue()" style="position:absolute; top:12px; right:12px; background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer;">✖</button>
-          <div style="font-size:36px; margin-bottom:10px;">⚠️</div>
-          <div style="font-size:16px; font-weight:800; color:var(--gold); margin-bottom:8px;">${title}</div>
-          <div style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:20px;">
-            ${message}
-          </div>
-          <button class="btn btn-primary" onclick="app.visitorLeaveQueue()" style="width:100%; padding:12px; font-weight:800; font-size:12px; margin:0;">
-            ↩️ Вернуться в Лобби
-          </button>
-        </div>
-      `;
-    }
-  }
-
-  visitorLeaveQueue() {
-    this.isPairingStarting = false;
-    clearInterval(this.state.lobbyCountdown);
-    const gameId = this.state.visitorSelectedGameId;
-    this.myQueueJoinTime = null;
-    if (this.queuePlayers && this.queuePlayers[this.myPlayerId]) {
-      delete this.queuePlayers[this.myPlayerId];
-    }
-    
-    this.sendNetworkMessage({
-      type: 'queue_leave',
-      gameId: gameId,
-      playerId: this.myPlayerId
-    });
-
-    this.broadcastNetworkPresence();
-
-    const overlay = document.getElementById('lobby-queue-overlay');
-    if (overlay) {
-      overlay.style.display = 'none';
-      overlay.innerHTML = `
-        <div class="lobby-radar-container">
-          <div class="lobby-radar-circle" id="visitor-radar-box"></div>
-          <div class="lobby-radar-pulse"></div>
-        </div>
-        <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-        <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">15 сек</div>
-        <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: 1 чел.</div>
-        <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
-      `;
-    }
-    this.initVisitorLobby();
   }
 
   startActiveGame(totalPlayers) {
@@ -6839,12 +6792,13 @@ initTTFTournament(isNextRound = false) {
     });
 
     const winner = this.checkTTFWinner(t.board);
+    const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
     if (winner) {
       t.winner = winner;
       if (winner === 'X') t.scoreX++;
       if (winner === 'O') t.scoreO++;
       this.finishTTFMatch(winner);
-    } else if (t.board.every(cell => cell !== null)) {
+    } else if (filledCells === 9) {
       t.winner = 'draw';
       t.drawsCount++;
       this.finishTTFMatch('draw');
@@ -6865,12 +6819,13 @@ initTTFTournament(isNextRound = false) {
     this.playAudioTone('click');
 
     const winner = this.checkTTFWinner(t.board);
+    const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
     if (winner) {
       t.winner = winner;
       if (winner === 'X') t.scoreX++;
       if (winner === 'O') t.scoreO++;
       this.finishTTFMatch(winner);
-    } else if (t.board.every(cell => cell !== null)) {
+    } else if (filledCells === 9) {
       t.winner = 'draw';
       t.drawsCount++;
       this.finishTTFMatch('draw');
