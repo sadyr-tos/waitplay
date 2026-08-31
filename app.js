@@ -320,6 +320,77 @@ class WaitPlayApp {
     };
   }
 
+  init() {
+    try {
+      this.loadState();
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const roleParam = urlParams.get('role');
+      const locParam = urlParams.get('loc');
+
+      if (roleParam === 'guest' || locParam) {
+        // GUEST / VISITOR ROUTING
+        const targetLoc = locParam || this.state.activeBranchId || 'loc_main';
+        this.state.visitorConnectedBranchId = targetLoc;
+        
+        const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
+        adminScreens.forEach(s => {
+          s.style.display = 'none';
+        });
+
+        const visitorFrame = document.getElementById('visitor-frame');
+        if (visitorFrame) {
+          visitorFrame.style.display = 'flex';
+        }
+
+        this.ensureMyPlayerProfile();
+        this.initRealtimeNetwork(targetLoc);
+        this.initVisitorLobby();
+      } else {
+        // ADMIN / OWNER ROUTING
+        const visitorFrame = document.getElementById('visitor-frame');
+        if (visitorFrame) {
+          visitorFrame.style.display = 'none';
+        }
+
+        const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
+        adminScreens.forEach(s => {
+          s.style.display = 'flex';
+        });
+
+        if (this.state.email && this.state.consentAccepted) {
+          this.setAdminPanelActiveView('dashboard');
+          this.renderAdminDashboard();
+        } else {
+          this.setAdminPanelActiveView('welcome-choice');
+        }
+      }
+    } catch(e) {
+      console.error("Error in app.init:", e);
+    }
+  }
+
+  initVisitorLobby() {
+    try {
+      this.setVisitorViewPanel('lobby');
+      this.renderVisitorLobbyGames();
+      
+      const branch = this.getVisitorConnectedBranch();
+      const venueName = branch ? branch.name : (this.state.activeBranchName || 'WaitPlay Заведение');
+      const titleEl = document.getElementById('visitor-venue-title');
+      const displayEl = document.getElementById('visitor-venue-name-display');
+      if (titleEl) titleEl.innerText = venueName;
+      if (displayEl) displayEl.innerText = venueName;
+
+      const badgeEl = document.getElementById('visitor-limit-badge-compact');
+      if (badgeEl) {
+        badgeEl.innerText = `${this.state.visitorGamesPlayed || 0} / 2`;
+      }
+    } catch(e) {
+      console.error("Error in initVisitorLobby:", e);
+    }
+  }
+
   getActiveCrosswordPreset(diff, layoutIdx) {
     const basePreset = CROSSWORD_PRESETS[diff].layouts[layoutIdx || 0];
     const preset = JSON.parse(JSON.stringify(basePreset));
