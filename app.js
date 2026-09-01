@@ -6566,6 +6566,7 @@ class WaitPlayApp {
 
 initTTFTournament(isNextRound = false) {
     this.ensureMyPlayerProfile();
+    this.closeTTFVictoryModal();
 
     let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
     if (!isNextRound) currentRound = 1;
@@ -6586,7 +6587,6 @@ initTTFTournament(isNextRound = false) {
 
     if (otherPlayers.length > 0) {
       const other = otherPlayers[0];
-      // Deterministic host election based on ID comparison
       if (this.myPlayerId > other.id) {
         isHost = false;
         mySymbol = 'O';
@@ -6630,7 +6630,8 @@ initTTFTournament(isNextRound = false) {
       oppName: oppName,
       board: Array(9).fill(null),
       status: status,
-      winner: null
+      winner: null,
+      winningLine: null
     };
 
     const scoreEl = document.getElementById('visitor-game-score');
@@ -6690,7 +6691,6 @@ initTTFTournament(isNextRound = false) {
       return;
     }
 
-    // Determine whose turn it is mathematically by counting symbols on board
     let countX = 0, countO = 0;
     t.board.forEach(cell => {
       if (cell === 'X') countX++;
@@ -6705,7 +6705,7 @@ initTTFTournament(isNextRound = false) {
     if (isWaiting) {
       turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">⏳ Ожидание второго живого игрока...</span>`;
     } else if (t.winner) {
-      turnIndicator = '';
+      turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">🏁 Раунд завершен!</span>`;
     } else if (isMyTurn) {
       turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:14px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
     } else {
@@ -6740,17 +6740,33 @@ initTTFTournament(isNextRound = false) {
       for (let i = 0; i < 9; i++) {
         const cell = t.board[i];
         const btn = document.createElement('button');
-        btn.style.cssText = 'height: 75px; font-size: 32px; font-weight: 900; background: #18142c; border: 2px solid var(--border-light); border-radius: 12px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: all 0.15s; margin: 0;';
+        btn.style.cssText = 'height: 75px; font-size: 32px; font-weight: 900; background: #18142c; border: 2px solid var(--border-light); border-radius: 12px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: all 0.2s; margin: 0;';
         
+        const isWinningCell = t.winningLine && t.winningLine.includes(i);
+
         if (cell === 'X') {
           btn.innerText = '❌';
-          btn.style.borderColor = 'var(--primary)';
-          btn.style.background = 'rgba(139, 92, 246, 0.15)';
+          if (isWinningCell) {
+            btn.style.border = '3px solid #10b981';
+            btn.style.background = 'rgba(16, 185, 129, 0.35)';
+            btn.style.boxShadow = '0 0 15px #10b981';
+            btn.style.transform = 'scale(1.05)';
+          } else {
+            btn.style.borderColor = 'var(--primary)';
+            btn.style.background = 'rgba(139, 92, 246, 0.15)';
+          }
           btn.disabled = true;
         } else if (cell === 'O') {
           btn.innerText = '⭕';
-          btn.style.borderColor = 'var(--gold)';
-          btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          if (isWinningCell) {
+            btn.style.border = '3px solid #10b981';
+            btn.style.background = 'rgba(16, 185, 129, 0.35)';
+            btn.style.boxShadow = '0 0 15px #10b981';
+            btn.style.transform = 'scale(1.05)';
+          } else {
+            btn.style.borderColor = 'var(--gold)';
+            btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          }
           btn.disabled = true;
         } else {
           btn.innerText = '';
@@ -6791,17 +6807,22 @@ initTTFTournament(isNextRound = false) {
       board: t.board
     });
 
-    const winner = this.checkTTFWinner(t.board);
+    const winResult = this.checkTTFWinner(t.board);
     const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
-    if (winner) {
-      t.winner = winner;
-      if (winner === 'X') t.scoreX++;
-      if (winner === 'O') t.scoreO++;
-      this.finishTTFMatch(winner);
+
+    if (winResult) {
+      t.winner = winResult.winner;
+      t.winningLine = winResult.line;
+      if (winResult.winner === 'X') t.scoreX++;
+      if (winResult.winner === 'O') t.scoreO++;
+      this.renderActiveGameQuestion();
+      setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
     } else if (filledCells === 9) {
       t.winner = 'draw';
+      t.winningLine = null;
       t.drawsCount++;
-      this.finishTTFMatch('draw');
+      this.renderActiveGameQuestion();
+      setTimeout(() => this.showTTFVictoryModal('draw'), 750);
     } else {
       this.renderActiveGameQuestion();
     }
@@ -6818,17 +6839,22 @@ initTTFTournament(isNextRound = false) {
     }
     this.playAudioTone('click');
 
-    const winner = this.checkTTFWinner(t.board);
+    const winResult = this.checkTTFWinner(t.board);
     const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
-    if (winner) {
-      t.winner = winner;
-      if (winner === 'X') t.scoreX++;
-      if (winner === 'O') t.scoreO++;
-      this.finishTTFMatch(winner);
+
+    if (winResult) {
+      t.winner = winResult.winner;
+      t.winningLine = winResult.line;
+      if (winResult.winner === 'X') t.scoreX++;
+      if (winResult.winner === 'O') t.scoreO++;
+      this.renderActiveGameQuestion();
+      setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
     } else if (filledCells === 9) {
       t.winner = 'draw';
+      t.winningLine = null;
       t.drawsCount++;
-      this.finishTTFMatch('draw');
+      this.renderActiveGameQuestion();
+      setTimeout(() => this.showTTFVictoryModal('draw'), 750);
     } else {
       this.renderActiveGameQuestion();
     }
@@ -6836,6 +6862,7 @@ initTTFTournament(isNextRound = false) {
 
   handleRemoteTTFRestart(data) {
     if (data.gameId === 4) {
+      this.closeTTFVictoryModal();
       this.initTTFTournament(true);
     }
   }
@@ -6848,64 +6875,85 @@ initTTFTournament(isNextRound = false) {
     ];
     for (const [a, b, c] of lines) {
       if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return board[a];
+        return { winner: board[a], line: [a, b, c] };
       }
     }
     return null;
   }
 
-  finishTTFMatch(result) {
-    const textLabel = document.getElementById('visitor-game-question-text');
-    const optionsBox = document.getElementById('visitor-game-options-container');
+  showTTFVictoryModal(result) {
+    this.closeTTFVictoryModal();
     const t = this.state.tttTournament;
 
-    let resultHtml = '';
+    let icon = '🏆';
+    let title = 'ПОЗДРАВЛЯЕМ! ВЫ ПОБЕДИЛИ!';
+    let subtitle = 'Вы собрали 3 в ряд и выиграли этот раунд!';
+    let titleColor = 'var(--gold)';
+
     if (result === 'draw') {
-      this.showVisitorToast("🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!", false);
-      resultHtml = `
-        <div style="text-align:center;">
-          <h3 style="color:#fff; margin-bottom:6px;">🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!</h3>
-          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
-        </div>
-      `;
+      icon = '🤝';
+      title = 'БОЕВАЯ НИЧЬЯ!';
+      subtitle = 'Все 9 клеток заполнены, победитель не определен.';
+      titleColor = '#ffffff';
     } else if (t && result === t.mySymbol) {
-      this.showVisitorToast("🎉 ВЫ ВЫИГРАЛИ ЭТОТ РАУНД!", false);
-      resultHtml = `
-        <div style="text-align:center;">
-          <h3 style="color:var(--success); margin-bottom:6px;">🎉 ВЫ ВЫИГРАЛИ РАУНД! 🏆</h3>
-          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t.scoreX} — ⭕ ${t.scoreO}</div>
-        </div>
-      `;
+      icon = '🏆';
+      title = '🎉 ПОЗДРАВЛЯЕМ! ВЫ ПОБЕДИЛИ!';
+      subtitle = 'Вы собрали победную линию из трёх символов!';
+      titleColor = 'var(--success)';
+      this.showVisitorToast("🎉 ВЫ ПОБЕДИЛИ В РАУНДЕ!", false);
     } else {
-      this.showVisitorToast("👏 РАУНД ВЫИГРАЛ СОПЕРНИК!", false);
-      resultHtml = `
-        <div style="text-align:center;">
-          <h3 style="color:var(--gold); margin-bottom:6px;">👏 Раунд выиграл соперник (${t ? t.oppName : ''})</h3>
-          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
-        </div>
-      `;
+      icon = '👏';
+      title = `👏 Раунд выиграл ${t ? t.oppName : 'соперник'}`;
+      subtitle = 'Возьмите реванш в следующем раунде!';
+      titleColor = 'var(--gold)';
+      this.showVisitorToast("Раунд выиграл соперник 👏", false);
     }
 
-    if (textLabel) textLabel.innerHTML = resultHtml;
+    const scoreText = `🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0} (Ничьих: ${t ? t.drawsCount : 0})`;
 
-    if (optionsBox) {
-      optionsBox.innerHTML = `
-        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800; font-size: 14px; margin-bottom: 8px;" onclick="app.requestLiveTTFRestart()">
-          🔄 Следующий раунд 🎯
-        </button>
-        <button class="btn btn-secondary" style="grid-column: 1 / -1; width: 100%; padding: 10px; font-size: 12px; font-weight: 700;" onclick="app.visitorExitActiveGame()">
-          🚪 Вернуться в Лобби
-        </button>
-      `;
+    const modal = document.createElement('div');
+    modal.id = 'visitor-ttt-result-modal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(11, 10, 19, 0.88); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 99999; padding: 20px; animation: fadeIn 0.25s ease-out;';
+    
+    modal.innerHTML = `
+      <div style="background: linear-gradient(135deg, #1f1b3c, #141128); border: 2px solid var(--border-light); border-radius: 20px; padding: 24px 20px; max-width: 320px; width: 100%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.6); box-sizing: border-box;">
+        <div style="font-size: 48px; margin-bottom: 8px; animation: bounce 1s infinite;">${icon}</div>
+        <h3 style="color: ${titleColor}; font-size: 16px; font-weight: 800; margin: 0 0 6px 0; line-height: 1.3;">${title}</h3>
+        <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 14px 0; line-height: 1.4;">${subtitle}</p>
+        
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-light); border-radius: 10px; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 16px;">
+          ${scoreText}
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+          <button class="btn btn-primary" style="padding: 12px; font-size: 13px; font-weight: 800; width: 100%; margin: 0;" onclick="app.requestLiveTTFRestart()">
+            🔄 Следующий раунд (Реванш) 🎯
+          </button>
+          <button class="btn btn-secondary" style="padding: 10px; font-size: 11px; font-weight: 700; width: 100%; margin: 0;" onclick="app.closeTTFVictoryModal(); app.visitorExitActiveGame();">
+            🚪 Вернуться в Лобби
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+  }
+
+  closeTTFVictoryModal() {
+    const modal = document.getElementById('visitor-ttt-result-modal');
+    if (modal) {
+      modal.remove();
     }
   }
 
   requestLiveTTFRestart() {
+    this.closeTTFVictoryModal();
     this.sendNetworkMessage({ type: 'ttt_rematch', gameId: 4 });
     this.initTTFTournament(true);
   }
 
-    renderActiveGameQuestion() {
+
+  renderActiveGameQuestion() {
     const qIndex = this.state.activeGameQIndex;
     const gameId = this.state.visitorSelectedGameId;
     const game = this.state.games.find(g => g.id === gameId);
