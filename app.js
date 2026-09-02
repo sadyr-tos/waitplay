@@ -359,7 +359,7 @@ class WaitPlayApp {
         });
 
         if (this.state.consentAccepted || this.state.email) {
-          if (!this.state.activeBranchId) this.state.activeBranchId = 'br_main';
+          if (!this.state.activeBranchId) this.state.activeBranchId = 'br_' + Math.random().toString(36).substring(2, 7) + Date.now().toString(36).slice(-4);
           if (!this.state.activeBranchName) this.state.activeBranchName = 'Моё заведение 🎮';
           this.setAdminPanelActiveView('dashboard');
           this.updateAdminView();
@@ -2890,8 +2890,10 @@ class WaitPlayApp {
   // --- STEPPED REGISTRATION WORKFLOW ---
   consentAccept() {
     this.state.consentAccepted = true;
-    if (!this.state.activeBranchId || !this.state.activeBranchName) {
-      this.state.activeBranchId = 'br_main';
+    if (!this.state.activeBranchId) {
+      this.state.activeBranchId = 'br_' + Math.random().toString(36).substring(2, 7) + Date.now().toString(36).slice(-4);
+    }
+    if (!this.state.activeBranchName) {
       this.state.activeBranchName = 'Моё заведение 🎮';
     }
     if (!this.state.email) {
@@ -6571,35 +6573,32 @@ initTTFTournament(isNextRound = false) {
     let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
     if (!isNextRound) currentRound = 1;
 
-    let scoreX = (this.state.tttTournament && this.state.tttTournament.scoreX) || 0;
-    let scoreO = (this.state.tttTournament && this.state.tttTournament.scoreO) || 0;
+    let myScore = (this.state.tttTournament && this.state.tttTournament.myScore) || 0;
+    let oppScore = (this.state.tttTournament && this.state.tttTournament.oppScore) || 0;
     let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
-    if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
+    if (!isNextRound) { myScore = 0; oppScore = 0; drawsCount = 0; }
 
     const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
 
+    // Determine Host vs Guest
     let isHost = true;
-    let mySymbol = 'X';
-    let oppSymbol = 'O';
+    if (!isNextRound) {
+      this.currentMatchSalt = Math.random();
+    }
+    const myKey = (this.currentMatchSalt || 0.5) + '_' + this.myPlayerId;
+
     let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
     let oppName = '⏳ Ожидание игрока 2...';
     let status = 'waiting';
 
+    const isOddRound = (currentRound % 2 === 1);
+
     if (otherPlayers.length > 0) {
       const other = otherPlayers[0];
-      if (this.myPlayerId > other.id) {
-        isHost = false;
-        mySymbol = 'O';
-        oppSymbol = 'X';
-        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 1'}`;
-        status = 'playing';
-      } else {
-        isHost = true;
-        mySymbol = 'X';
-        oppSymbol = 'O';
-        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
-        status = 'playing';
-      }
+      const otherKey = (this.currentMatchSalt || 0.5) + '_' + (other.id || 'x');
+      isHost = (myKey <= otherKey);
+      oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
+      status = 'playing';
 
       this.sendNetworkMessage({
         type: 'ttt_paired',
@@ -6618,10 +6617,21 @@ initTTFTournament(isNextRound = false) {
       });
     }
 
+    // Alternating roles: Odd rounds Host is X (starts first), Even rounds Host is O (Guest starts first!)
+    let mySymbol = 'X';
+    let oppSymbol = 'O';
+    if (isHost) {
+      mySymbol = isOddRound ? 'X' : 'O';
+      oppSymbol = isOddRound ? 'O' : 'X';
+    } else {
+      mySymbol = isOddRound ? 'O' : 'X';
+      oppSymbol = isOddRound ? 'X' : 'O';
+    }
+
     this.state.tttTournament = {
       round: currentRound,
-      scoreX: scoreX,
-      scoreO: scoreO,
+      myScore: myScore,
+      oppScore: oppScore,
       drawsCount: drawsCount,
       isHost: isHost,
       mySymbol: mySymbol,
@@ -6665,17 +6675,20 @@ initTTFTournament(isNextRound = false) {
     const t = this.state.tttTournament;
     if (!t) return;
 
+    const round = data.round || t.round || 1;
+    const isOddRound = (round % 2 === 1);
+
     if (this.myPlayerId === data.hostId) {
       t.isHost = true;
-      t.mySymbol = 'X';
-      t.oppSymbol = 'O';
+      t.mySymbol = isOddRound ? 'X' : 'O';
+      t.oppSymbol = isOddRound ? 'O' : 'X';
       t.myName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
       t.oppName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
       t.status = 'playing';
     } else if (this.myPlayerId === data.guestId) {
       t.isHost = false;
-      t.mySymbol = 'O';
-      t.oppSymbol = 'X';
+      t.mySymbol = isOddRound ? 'O' : 'X';
+      t.oppSymbol = isOddRound ? 'X' : 'O';
       t.myName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
       t.oppName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
       t.status = 'playing';
@@ -6712,16 +6725,16 @@ initTTFTournament(isNextRound = false) {
       turnIndicator = `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`;
     }
 
-    const scoreLine = `🏆 Счёт: ❌ ${t.scoreX} — ⭕ ${t.scoreO} (Ничьих: ${t.drawsCount})`;
+    const scoreLine = `🏆 Счёт серии: ${t.myScore} : ${t.oppScore} (Ничьих: ${t.drawsCount})`;
 
     if (textLabel) {
       textLabel.innerHTML = `
         <div style="text-align:center;">
           <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:3px;">🎮 КРЕСТИКИ-НОЛИКИ (РАУНД ${t.round})</div>
           <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:4px;">
-            <span style="${t.mySymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="font-weight:800; color:${t.mySymbol === 'X' ? 'var(--primary)' : 'var(--gold)'}">${t.myName} (${t.mySymbol})</span>
             <span style="color:var(--gold); font-size:11px;">VS</span>
-            <span style="${t.oppSymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="font-weight:800; color:${t.oppSymbol === 'X' ? 'var(--primary)' : 'var(--gold)'}">${t.oppName} (${t.oppSymbol})</span>
           </div>
           <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">${scoreLine}</div>
           <div style="min-height:22px;">${turnIndicator}</div>
@@ -6813,8 +6826,11 @@ initTTFTournament(isNextRound = false) {
     if (winResult) {
       t.winner = winResult.winner;
       t.winningLine = winResult.line;
-      if (winResult.winner === 'X') t.scoreX++;
-      if (winResult.winner === 'O') t.scoreO++;
+      if (winResult.winner === t.mySymbol) {
+        t.myScore++;
+      } else {
+        t.oppScore++;
+      }
       this.renderActiveGameQuestion();
       setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
     } else if (filledCells === 9) {
@@ -6845,8 +6861,11 @@ initTTFTournament(isNextRound = false) {
     if (winResult) {
       t.winner = winResult.winner;
       t.winningLine = winResult.line;
-      if (winResult.winner === 'X') t.scoreX++;
-      if (winResult.winner === 'O') t.scoreO++;
+      if (winResult.winner === t.mySymbol) {
+        t.myScore++;
+      } else {
+        t.oppScore++;
+      }
       this.renderActiveGameQuestion();
       setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
     } else if (filledCells === 9) {
@@ -6909,7 +6928,7 @@ initTTFTournament(isNextRound = false) {
       this.showVisitorToast("Раунд выиграл соперник 👏", false);
     }
 
-    const scoreText = `🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0} (Ничьих: ${t ? t.drawsCount : 0})`;
+    const scoreText = `🏆 Счёт серии: ${t ? t.myScore : 0} : ${t ? t.oppScore : 0} (Ничьих: ${t ? t.drawsCount : 0})`;
 
     const modal = document.createElement('div');
     modal.id = 'visitor-ttt-result-modal';
