@@ -6286,7 +6286,19 @@ class WaitPlayApp {
       this.myQueueJoinTime = Date.now();
       this.saveState();
       
-      // Wipe any stale queue cache
+      // Determine Shared Queue End Time: Join existing 15s window or start new 15s window
+      this.activeQueues = this.activeQueues || {};
+      const existingQueue = this.activeQueues[gameId];
+      let sharedEndTime = Date.now() + 15000;
+
+      if (existingQueue && existingQueue.endTime && (existingQueue.endTime - Date.now() > 1000)) {
+        sharedEndTime = existingQueue.endTime;
+      } else {
+        this.activeQueues[gameId] = { endTime: sharedEndTime, hostId: this.myPlayerId };
+      }
+      this.queueEndTime = sharedEndTime;
+
+      // Wipe stale queue and add myself
       this.queuePlayers = {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
@@ -6294,6 +6306,8 @@ class WaitPlayApp {
         gameId: gameId,
         lastSeen: Date.now()
       };
+
+      const initialRemainingSec = Math.max(1, Math.ceil((this.queueEndTime - Date.now()) / 1000));
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6304,7 +6318,7 @@ class WaitPlayApp {
             <div class="lobby-radar-pulse"></div>
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">15 сек</div>
+          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${initialRemainingSec} сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: 1 чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
@@ -6313,25 +6327,30 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
+      // Announce queue entry along with shared queue timer
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gameId,
-        profile: this.myPlayerProfile
+        profile: this.myPlayerProfile,
+        queueEndTime: this.queueEndTime
       });
 
+      // Synchronized timer tick (checked every 250ms for razor-sharp accuracy)
       clearInterval(this.state.lobbyCountdown);
-      this.state.lobbyTimerVal = 15;
-
-      this.state.lobbyCountdown = setInterval(() => {
-        this.state.lobbyTimerVal--;
+      const tick = () => {
+        const remainingMs = this.queueEndTime - Date.now();
+        const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+        
         const timerEl = document.getElementById('lobby-countdown-timer');
-        if (timerEl) timerEl.innerText = `${this.state.lobbyTimerVal} сек`;
+        if (timerEl) timerEl.innerText = `${remainingSec} сек`;
 
-        if (this.state.lobbyTimerVal <= 0) {
+        if (remainingMs <= 0) {
           clearInterval(this.state.lobbyCountdown);
           this.finishQueueMatchmaking(gameId);
         }
-      }, 1000);
+      };
+      tick();
+      this.state.lobbyCountdown = setInterval(tick, 250);
     } catch(e) {
       console.error("Error in visitorJoinLobby:", e);
     }
@@ -6360,33 +6379,49 @@ class WaitPlayApp {
     }
   }
 
-  checkInstantQueuePairing(gameId) {
-    const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
-    if (inQueue.length >= 2) {
-      if (this.isPairingStarting) return;
-      this.isPairingStarting = true;
-
+  visitorLeaveQueue() {
+    try {
       clearInterval(this.state.lobbyCountdown);
-      const labelEl = document.getElementById('lobby-countdown-label');
-      const timerEl = document.getElementById('lobby-countdown-timer');
-      if (labelEl) labelEl.innerText = 'Пара найдена! Старт:';
-      
-      let startSec = 2;
-      if (timerEl) timerEl.innerText = `${startSec} сек`;
-      
-      this.state.lobbyCountdown = setInterval(() => {
-        startSec--;
-        if (timerEl) timerEl.innerText = `${startSec} сек`;
-        if (startSec <= 0) {
-          clearInterval(this.state.lobbyCountdown);
-          this.isPairingStarting = false;
-          this.finishQueueMatchmaking(gameId);
-        }
-      }, 1000);
+      const exitingGameId = this.state.visitorSelectedGameId;
+      this.state.visitorSelectedGameId = null;
+      this.queueEndTime = null;
+      this.queuePlayers = {};
+
+      const overlay = document.getElementById('lobby-queue-overlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+        overlay.innerHTML = '';
+      }
+
+      const gamePanel = document.getElementById('visitor-game-panel');
+      if (gamePanel) {
+        gamePanel.classList.remove('active');
+        gamePanel.style.display = 'none';
+      }
+      const resultsPanel = document.getElementById('visitor-results-panel');
+      if (resultsPanel) {
+        resultsPanel.classList.remove('active');
+        resultsPanel.style.display = 'none';
+      }
+      const lobbyPanel = document.getElementById('visitor-lobby-panel');
+      if (lobbyPanel) {
+        lobbyPanel.classList.add('active');
+        lobbyPanel.style.display = 'flex';
+      }
+
+      this.sendNetworkMessage({
+        type: 'queue_leave',
+        gameId: exitingGameId,
+        playerId: this.myPlayerId
+      });
+
+      this.renderVisitorLobbyGames();
+    } catch(e) {
+      console.error("Error in visitorLeaveQueue:", e);
     }
   }
 
-    finishQueueMatchmaking(gameId) {
+  finishQueueMatchmaking(gameId) {
     try {
       const overlay = document.getElementById('lobby-queue-overlay');
       const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
@@ -6395,10 +6430,10 @@ class WaitPlayApp {
       if (totalLiveInQueue < 2) {
         if (overlay) {
           overlay.innerHTML = `
-            <div style="font-size:36px; margin-bottom:10px;">⚠️</div>
-            <h3 style="color:#fff; margin-bottom:6px;">Недостаточно игроков</h3>
-            <p style="font-size:11px; color:var(--text-muted); margin-bottom:15px;">Для игры нужно минимум 2 игрока (набралось: ${totalLiveInQueue}).</p>
-            <button class="btn btn-primary" style="padding:8px 18px; font-size:12px;" onclick="app.visitorLeaveQueue()">Закрыть ✖</button>
+            <div style="font-size:36px; margin-bottom:10px; animation: bounce 1s infinite;">⚠️</div>
+            <h3 style="color:#fff; margin-bottom:6px; font-size:16px; font-weight:800;">Недостаточно игроков</h3>
+            <p style="font-size:11px; color:var(--text-muted); margin-bottom:16px; line-height:1.4;">Для игры нужно минимум 2 игрока (набралось: ${totalLiveInQueue}).</p>
+            <button class="btn btn-primary" style="padding:10px 24px; font-size:12px; font-weight:800; cursor:pointer;" onclick="app.visitorLeaveQueue()">Закрыть ✖</button>
           `;
         }
         return;
@@ -6406,6 +6441,7 @@ class WaitPlayApp {
 
       if (overlay) {
         overlay.style.display = 'none';
+        overlay.innerHTML = '';
       }
 
       this.startActiveGame(totalLiveInQueue);
