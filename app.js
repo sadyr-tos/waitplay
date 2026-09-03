@@ -6972,6 +6972,577 @@ initTTFTournament(isNextRound = false) {
   }
 
 
+  // ==========================================
+  // 🎯 LIVE MULTIPLAYER QUIZ (GAME 1)
+  // ==========================================
+  initLiveQuizGame(totalPlayers) {
+    this.ensureMyPlayerProfile();
+    this.state.activeGameScore = 0;
+    this.state.activeGameQIndex = 0;
+    this.quizHasAnswered = false;
+
+    // Load templates from active branch or state
+    const branch = this.getVisitorConnectedBranch();
+    const branchTemplates = (branch && branch.templates && branch.templates.length > 0) ? branch.templates : this.state.templates;
+    this.liveQuizQuestions = (branchTemplates && branchTemplates.length > 0) ? branchTemplates : [
+      { q: "Какой напиток самый популярный в мире после воды?", options: ["Чай", "Кофе", "Сок", "Лимонад"], correct: 0 },
+      { q: "Из какой страны родом пицца?", options: ["Франция", "Италия", "Испания", "Греция"], correct: 1 },
+      { q: "Какое блюдо является традиционным узбекским?", options: ["Плов", "Борщ", "Суши", "Паста"], correct: 0 },
+      { q: "Сколько градусов в прямом угле?", options: ["45", "90", "180", "360"], correct: 1 }
+    ];
+
+    // Initialize live scores for all real players in queue
+    this.liveQuizScores = {};
+    const inQueue = Object.values(this.queuePlayers || {});
+    inQueue.forEach(p => {
+      this.liveQuizScores[p.id] = {
+        id: p.id,
+        name: p.name || 'Игрок',
+        avatar: p.avatar || '🐼',
+        score: 0
+      };
+    });
+    this.liveQuizScores[this.myPlayerId] = {
+      id: this.myPlayerId,
+      name: this.myPlayerProfile.name,
+      avatar: this.myPlayerProfile.avatar,
+      score: 0
+    };
+
+    const typeLabel = document.getElementById('visitor-game-type-label');
+    if (typeLabel) typeLabel.innerText = "ВИКТОРИНА 🎯";
+
+    this.renderLiveQuizQuestion();
+  }
+
+  renderLiveQuizQuestion() {
+    const qIdx = this.state.activeGameQIndex;
+    const totalQ = this.liveQuizQuestions.length;
+    const qData = this.liveQuizQuestions[qIdx];
+    this.quizHasAnswered = false;
+
+    const qIndexEl = document.getElementById('visitor-game-q-index');
+    if (qIndexEl) qIndexEl.innerText = `Вопрос ${qIdx + 1} из ${totalQ}`;
+
+    const scoreEl = document.getElementById('visitor-game-score');
+    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
+
+    const textLabel = document.getElementById('visitor-game-question-text');
+    if (textLabel) {
+      textLabel.innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:14px; font-weight:800; color:#fff; line-height:1.4; margin-bottom:6px;">${qData.q}</div>
+          <div id="quiz-question-timer-badge" style="display:inline-block; font-size:11px; font-weight:800; color:var(--gold); background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:12px; padding:3px 10px;">⏱️ 15 сек</div>
+        </div>
+      `;
+    }
+
+    const optionsBox = document.getElementById('visitor-game-options');
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.style.display = 'flex';
+      optionsBox.style.flexDirection = 'column';
+      optionsBox.style.gap = '8px';
+      optionsBox.style.maxWidth = '320px';
+      optionsBox.style.margin = '10px auto';
+
+      const letters = ['A', 'B', 'C', 'D'];
+      qData.options.forEach((opt, optIdx) => {
+        const btn = document.createElement('button');
+        btn.id = `quiz-opt-btn-${optIdx}`;
+        btn.className = 'btn btn-secondary';
+        btn.style.cssText = 'width:100%; padding:12px 14px; font-size:13px; font-weight:700; text-align:left; display:flex; align-items:center; gap:10px; border-radius:10px; border:1px solid var(--border-light); background:#151226; color:#fff; cursor:pointer; outline:none; transition:all 0.15s; margin:0;';
+        btn.innerHTML = `
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; background:rgba(139,92,246,0.25); color:var(--primary); font-size:11px; font-weight:900;">${letters[optIdx]}</span>
+          <span style="flex:1;">${opt}</span>
+        `;
+        btn.onclick = () => this.handleLiveQuizAnswer(optIdx, qData.correct);
+        optionsBox.appendChild(btn);
+      });
+    }
+
+    this.renderLiveQuizLeaderboard();
+
+    // Start 15s question countdown timer
+    clearInterval(this.quizQuestionTimer);
+    let timeLeft = 15;
+    this.quizQuestionTimer = setInterval(() => {
+      timeLeft--;
+      const badge = document.getElementById('quiz-question-timer-badge');
+      if (badge) badge.innerText = `⏱️ ${timeLeft} сек`;
+
+      if (timeLeft <= 0) {
+        clearInterval(this.quizQuestionTimer);
+        if (!this.quizHasAnswered) {
+          this.handleLiveQuizAnswer(-1, qData.correct, true);
+        }
+      }
+    }, 1000);
+  }
+
+  handleLiveQuizAnswer(chosenIdx, correctIdx, isTimeout = false) {
+    if (this.quizHasAnswered) return;
+    this.quizHasAnswered = true;
+    clearInterval(this.quizQuestionTimer);
+
+    const isCorrect = (chosenIdx === correctIdx);
+    const chosenBtn = document.getElementById(`quiz-opt-btn-${chosenIdx}`);
+    const correctBtn = document.getElementById(`quiz-opt-btn-${correctIdx}`);
+
+    if (chosenBtn) {
+      if (isCorrect) {
+        chosenBtn.style.background = 'rgba(16, 185, 129, 0.3)';
+        chosenBtn.style.borderColor = '#10b981';
+      } else {
+        chosenBtn.style.background = 'rgba(239, 68, 68, 0.3)';
+        chosenBtn.style.borderColor = '#ef4444';
+      }
+    }
+    if (correctBtn && !isCorrect) {
+      correctBtn.style.background = 'rgba(16, 185, 129, 0.3)';
+      correctBtn.style.borderColor = '#10b981';
+    }
+
+    if (isCorrect) {
+      this.playAudioTone('win');
+      this.state.activeGameScore += 100;
+      const scoreEl = document.getElementById('visitor-game-score');
+      if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
+      this.showVisitorToast("+100 очков! Верно! 🎯", false);
+    } else {
+      this.playAudioTone('click');
+      this.showVisitorToast(isTimeout ? "Время вышло! ⏱️" : "Неверный ответ! ❌", true);
+    }
+
+    // Update local score
+    if (this.liveQuizScores && this.liveQuizScores[this.myPlayerId]) {
+      this.liveQuizScores[this.myPlayerId].score = this.state.activeGameScore;
+    }
+    this.renderLiveQuizLeaderboard();
+
+    // Broadcast score update to other real phones
+    this.sendNetworkMessage({
+      type: 'quiz_score',
+      gameId: 1,
+      playerId: this.myPlayerId,
+      score: this.state.activeGameScore,
+      qIndex: this.state.activeGameQIndex
+    });
+
+    // Advance to next question after 2s
+    setTimeout(() => {
+      this.state.activeGameQIndex++;
+      if (this.state.activeGameQIndex < this.liveQuizQuestions.length) {
+        this.renderLiveQuizQuestion();
+      } else {
+        this.finishLiveQuizGame();
+      }
+    }, 2000);
+  }
+
+  handleRemoteQuizScore(data) {
+    if (!this.liveQuizScores) this.liveQuizScores = {};
+    const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
+    
+    this.liveQuizScores[data.playerId] = {
+      id: data.playerId,
+      name: playerInfo.name || 'Игрок',
+      avatar: playerInfo.avatar || '🐼',
+      score: data.score
+    };
+    this.renderLiveQuizLeaderboard();
+  }
+
+  renderLiveQuizLeaderboard() {
+    const listContainer = document.getElementById('visitor-game-players-list');
+    if (!listContainer) return;
+
+    const scoresArr = Object.values(this.liveQuizScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+
+    listContainer.innerHTML = '';
+    scoresArr.forEach((p, idx) => {
+      const isMe = (p.id === this.myPlayerId);
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
+      
+      const medals = ['🥇', '🥈', '🥉'];
+      const rankBadge = medals[idx] || `#${idx + 1}`;
+
+      row.innerHTML = `
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>${rankBadge}</span>
+          <span>${p.avatar || '👤'}</span>
+          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
+        </div>
+        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
+      `;
+      listContainer.appendChild(row);
+    });
+  }
+
+  finishLiveQuizGame() {
+    clearInterval(this.quizQuestionTimer);
+    const scoresArr = Object.values(this.liveQuizScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+
+    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
+    const isWinnerMe = (winner.id === this.myPlayerId);
+
+    this.finishVisitorGame(winner, isWinnerMe);
+  }
+
+  // ==========================================
+  // 📝 LIVE MULTIPLAYER CROSSWORD (GAME 2)
+  // ==========================================
+  initLiveCrosswordGame(totalPlayers) {
+    this.ensureMyPlayerProfile();
+    this.state.activeGameScore = 0;
+
+    const branch = this.getVisitorConnectedBranch();
+    this.liveCrosswordWords = (branch && branch.crosswordWords && branch.crosswordWords.length > 0) ? branch.crosswordWords : [
+      { num: 1, word: "ВИЛКА", clue: "Столовый прибор с острыми зубцами", solved: false, dir: "vertical" },
+      { num: 2, word: "ПИЦЦА", clue: "Итальянская лепешка с сыром и соусом", solved: false, dir: "horizontal" },
+      { num: 3, word: "ЧАЙ", clue: "Горячий ароматный напиток из листьев", solved: false, dir: "horizontal" }
+    ];
+
+    this.liveCrosswordScores = {};
+    const inQueue = Object.values(this.queuePlayers || {});
+    inQueue.forEach(p => {
+      this.liveCrosswordScores[p.id] = { id: p.id, name: p.name, avatar: p.avatar, score: 0 };
+    });
+    this.liveCrosswordScores[this.myPlayerId] = { id: this.myPlayerId, name: this.myPlayerProfile.name, avatar: this.myPlayerProfile.avatar, score: 0 };
+
+    const typeLabel = document.getElementById('visitor-game-type-label');
+    if (typeLabel) typeLabel.innerText = "КРОССВОРД 📝";
+
+    this.renderLiveCrosswordGrid();
+  }
+
+  renderLiveCrosswordGrid() {
+    const textLabel = document.getElementById('visitor-game-question-text');
+    const optionsBox = document.getElementById('visitor-game-options');
+    const scoreEl = document.getElementById('visitor-game-score');
+    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
+
+    const unsolved = this.liveCrosswordWords.filter(w => !w.solved);
+    if (unsolved.length === 0) {
+      this.finishLiveCrosswordGame();
+      return;
+    }
+
+    const currentWord = unsolved[0];
+
+    if (textLabel) {
+      textLabel.innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Слово #${currentWord.num} (${currentWord.word.length} букв)</div>
+          <div style="font-size:13px; font-weight:700; color:#fff; margin-bottom:8px;">💡 ${currentWord.clue}</div>
+        </div>
+      `;
+    }
+
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.style.display = 'flex';
+      optionsBox.style.flexDirection = 'column';
+      optionsBox.style.gap = '10px';
+      optionsBox.style.maxWidth = '300px';
+      optionsBox.style.margin = '10px auto';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = `Введите слово (${currentWord.word.length} букв)...`;
+      input.style.cssText = 'width:100%; padding:12px; font-size:14px; text-transform:uppercase; text-align:center; font-weight:800; letter-spacing:2px; background:#110e1f; border:2px solid var(--border-light); border-radius:12px; color:#fff; outline:none; box-sizing:border-box;';
+      
+      const submitBtn = document.createElement('button');
+      submitBtn.className = 'btn btn-primary';
+      submitBtn.style.cssText = 'width:100%; padding:12px; font-size:13px; font-weight:800; margin:0;';
+      submitBtn.innerText = '✔️ Отгадать слово (+150 очков)';
+      submitBtn.onclick = () => {
+        const val = input.value.trim().toUpperCase();
+        if (val === currentWord.word) {
+          currentWord.solved = true;
+          this.state.activeGameScore += 150;
+          this.playAudioTone('win');
+          this.showVisitorToast(`Слово "${val}" отгадано! 🎉 +150 очков`, false);
+
+          this.sendNetworkMessage({
+            type: 'crossword_solve',
+            gameId: 2,
+            playerId: this.myPlayerId,
+            wordIdx: currentWord.num,
+            score: this.state.activeGameScore
+          });
+
+          this.renderLiveCrosswordGrid();
+        } else {
+          this.playAudioTone('click');
+          this.showVisitorToast("Неверное слово! Попробуйте ещё раз ❌", true);
+          input.value = '';
+          input.focus();
+        }
+      };
+
+      optionsBox.appendChild(input);
+      optionsBox.appendChild(submitBtn);
+    }
+
+    this.renderLiveCrosswordLeaderboard();
+  }
+
+  handleRemoteCrosswordSolve(data) {
+    if (!this.liveCrosswordScores) this.liveCrosswordScores = {};
+    const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
+    
+    this.liveCrosswordScores[data.playerId] = {
+      id: data.playerId,
+      name: playerInfo.name || 'Игрок',
+      avatar: playerInfo.avatar || '🐼',
+      score: data.score
+    };
+
+    const targetWord = (this.liveCrosswordWords || []).find(w => w.num === data.wordIdx);
+    if (targetWord) targetWord.solved = true;
+
+    this.renderLiveCrosswordLeaderboard();
+  }
+
+  renderLiveCrosswordLeaderboard() {
+    const listContainer = document.getElementById('visitor-game-players-list');
+    if (!listContainer) return;
+
+    const scoresArr = Object.values(this.liveCrosswordScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+
+    listContainer.innerHTML = '';
+    scoresArr.forEach((p, idx) => {
+      const isMe = (p.id === this.myPlayerId);
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
+      row.innerHTML = `
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>#${idx + 1}</span>
+          <span>${p.avatar || '👤'}</span>
+          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
+        </div>
+        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
+      `;
+      listContainer.appendChild(row);
+    });
+  }
+
+  finishLiveCrosswordGame() {
+    const scoresArr = Object.values(this.liveCrosswordScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
+    this.finishVisitorGame(winner, winner.id === this.myPlayerId);
+  }
+
+  // ==========================================
+  // 🗣️ LIVE MULTIPLAYER ПОЛЕ ЧУДЕС (GAME 3)
+  // ==========================================
+  initLiveGuessWordGame(totalPlayers) {
+    this.ensureMyPlayerProfile();
+    this.state.activeGameScore = 0;
+
+    const branch = this.getVisitorConnectedBranch();
+    const customWord = (branch && branch.guessWordCustomWord) ? branch.guessWordCustomWord.trim().toUpperCase() : (this.state.guessWordCustomWord || '').trim().toUpperCase();
+    const customClue = (branch && branch.guessWordCustomClue) ? branch.guessWordCustomClue.trim() : (this.state.guessWordCustomClue || '').trim();
+
+    if (customWord && customWord.length >= 2) {
+      this.guessWordSecret = customWord;
+      this.guessWordClue = customClue || "Секретное слово заведения!";
+    } else {
+      const presets = [
+        { word: "РЕСТОРАН", clue: "Заведение, где подают изысканные блюда и напитки" },
+        { word: "ОФИЦИАНТ", clue: "Сотрудник, который принимает заказы и обслуживает столики" },
+        { word: "ШЕФПОВАР", clue: "Главный мастер на кухне ресторана" },
+        { word: "КАПУЧИНО", clue: "Популярный кофейный напиток с нежной молочной пенкой" }
+      ];
+      const pick = presets[Math.floor(Math.random() * presets.length)];
+      this.guessWordSecret = pick.word;
+      this.guessWordClue = pick.clue;
+    }
+
+    this.guessWordRevealed = Array(this.guessWordSecret.length).fill(false);
+    this.guessWordGuessedLetters = new Set();
+
+    this.liveGuessWordScores = {};
+    const inQueue = Object.values(this.queuePlayers || {});
+    inQueue.forEach(p => {
+      this.liveGuessWordScores[p.id] = { id: p.id, name: p.name, avatar: p.avatar, score: 0 };
+    });
+    this.liveGuessWordScores[this.myPlayerId] = { id: this.myPlayerId, name: this.myPlayerProfile.name, avatar: this.myPlayerProfile.avatar, score: 0 };
+
+    const typeLabel = document.getElementById('visitor-game-type-label');
+    if (typeLabel) typeLabel.innerText = "ПОЛЕ ЧУДЕС 🗣️";
+
+    this.renderLiveGuessWordGame();
+  }
+
+  renderLiveGuessWordGame() {
+    const textLabel = document.getElementById('visitor-game-question-text');
+    const optionsBox = document.getElementById('visitor-game-options');
+    const scoreEl = document.getElementById('visitor-game-score');
+    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
+
+    const qIndexEl = document.getElementById('visitor-game-q-index');
+    if (qIndexEl) qIndexEl.innerText = `Слово из ${this.guessWordSecret.length} букв`;
+
+    // Render hidden word boxes
+    let wordBoxesHtml = '<div style="display:flex; justify-content:center; gap:6px; margin:12px 0; flex-wrap:wrap;">';
+    for (let i = 0; i < this.guessWordSecret.length; i++) {
+      const isRevealed = this.guessWordRevealed[i];
+      const letter = isRevealed ? this.guessWordSecret[i] : '';
+      wordBoxesHtml += `
+        <div style="width:34px; height:42px; background:#110e1f; border:2px solid ${isRevealed ? 'var(--primary)' : 'var(--border-light)'}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:900; color:${isRevealed ? '#fff' : 'transparent'}; box-shadow:${isRevealed ? '0 0 10px rgba(139,92,246,0.4)' : 'none'};">
+          ${letter}
+        </div>
+      `;
+    }
+    wordBoxesHtml += '</div>';
+
+    if (textLabel) {
+      textLabel.innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:11px; font-weight:700; color:var(--gold); margin-bottom:4px;">💡 Подсказка к слову:</div>
+          <div style="font-size:13px; font-weight:700; color:#fff; line-height:1.4;">${this.guessWordClue}</div>
+          ${wordBoxesHtml}
+        </div>
+      `;
+    }
+
+    // Render Russian Alphabet Keyboard
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.style.display = 'grid';
+      optionsBox.style.gridTemplateColumns = 'repeat(8, 1fr)';
+      optionsBox.style.gap = '4px';
+      optionsBox.style.maxWidth = '340px';
+      optionsBox.style.margin = '8px auto';
+
+      const alphabet = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ".split('');
+      alphabet.forEach(letter => {
+        const btn = document.createElement('button');
+        const isUsed = this.guessWordGuessedLetters.has(letter);
+        btn.style.cssText = `height:34px; font-size:12px; font-weight:800; border-radius:6px; border:1px solid var(--border-light); display:flex; align-items:center; justify-content:center; cursor:pointer; outline:none; margin:0; ${isUsed ? 'background:#1f1c30; opacity:0.35; color:#666; cursor:not-allowed;' : 'background:#18142c; color:#fff;'}`;
+        btn.innerText = letter;
+        btn.disabled = isUsed;
+
+        btn.onclick = () => this.handleLiveGuessWordLetter(letter);
+        optionsBox.appendChild(btn);
+      });
+    }
+
+    this.renderLiveGuessWordLeaderboard();
+  }
+
+  handleLiveGuessWordLetter(letter) {
+    if (this.guessWordGuessedLetters.has(letter)) return;
+    this.guessWordGuessedLetters.add(letter);
+
+    let matchCount = 0;
+    for (let i = 0; i < this.guessWordSecret.length; i++) {
+      if (this.guessWordSecret[i] === letter) {
+        this.guessWordRevealed[i] = true;
+        matchCount++;
+      }
+    }
+
+    if (matchCount > 0) {
+      this.playAudioTone('win');
+      const gained = matchCount * 75;
+      this.state.activeGameScore += gained;
+      this.showVisitorToast(`Есть буква "${letter}"! (+${gained} очков) 🎉`, false);
+    } else {
+      this.playAudioTone('click');
+      this.showVisitorToast(`Буквы "${letter}" нет в слове ❌`, true);
+    }
+
+    // Update local score
+    if (this.liveGuessWordScores && this.liveGuessWordScores[this.myPlayerId]) {
+      this.liveGuessWordScores[this.myPlayerId].score = this.state.activeGameScore;
+    }
+
+    // Broadcast letter guess to all other phones
+    this.sendNetworkMessage({
+      type: 'guessword_letter',
+      gameId: 3,
+      playerId: this.myPlayerId,
+      letter: letter,
+      isCorrect: (matchCount > 0),
+      revealed: this.guessWordRevealed,
+      score: this.state.activeGameScore
+    });
+
+    this.renderLiveGuessWordGame();
+
+    // Check if whole word is solved
+    if (this.guessWordRevealed.every(Boolean)) {
+      setTimeout(() => {
+        this.finishLiveGuessWordGame(this.myPlayerId);
+      }, 1000);
+    }
+  }
+
+  handleRemoteGuessWordLetter(data) {
+    if (data.letter) {
+      this.guessWordGuessedLetters.add(data.letter);
+    }
+    if (Array.isArray(data.revealed)) {
+      this.guessWordRevealed = [...data.revealed];
+    }
+    if (this.liveGuessWordScores) {
+      const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
+      this.liveGuessWordScores[data.playerId] = {
+        id: data.playerId,
+        name: playerInfo.name || 'Игрок',
+        avatar: playerInfo.avatar || '🐼',
+        score: data.score
+      };
+    }
+
+    this.renderLiveGuessWordGame();
+
+    if (this.guessWordRevealed.every(Boolean)) {
+      setTimeout(() => {
+        this.finishLiveGuessWordGame(data.playerId);
+      }, 1000);
+    }
+  }
+
+  renderLiveGuessWordLeaderboard() {
+    const listContainer = document.getElementById('visitor-game-players-list');
+    if (!listContainer) return;
+
+    const scoresArr = Object.values(this.liveGuessWordScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+
+    listContainer.innerHTML = '';
+    scoresArr.forEach((p, idx) => {
+      const isMe = (p.id === this.myPlayerId);
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
+      row.innerHTML = `
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>#${idx + 1}</span>
+          <span>${p.avatar || '👤'}</span>
+          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
+        </div>
+        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
+      `;
+      listContainer.appendChild(row);
+    });
+  }
+
+  finishLiveGuessWordGame(winnerId) {
+    const scoresArr = Object.values(this.liveGuessWordScores || {});
+    scoresArr.sort((a, b) => b.score - a.score);
+    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
+    this.finishVisitorGame(winner, winner.id === this.myPlayerId);
+  }
+
   renderActiveGameQuestion() {
     const qIndex = this.state.activeGameQIndex;
     const gameId = this.state.visitorSelectedGameId;
@@ -10914,6 +11485,86 @@ initTTFTournament(isNextRound = false) {
   resetVisitorSession() {
     sessionStorage.clear();
     location.reload();
+  }
+
+  showGameRules(gameId, event) {
+    if (event) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+
+    const rules = {
+      1: {
+        title: "Викторина 🎯",
+        icon: "🎯",
+        text: "<b>Цель игры:</b> Отвечайте на интересные вопросы быстрее всех и набирайте максимум очков!<br><br>• <b>Количество участников:</b> от 2 до 15 человек.<br>• <b>Начисление очков:</b> за каждый правильный ответ начисляются баллы. Чем быстрее ответ, тем выше место в таблице лидеров!<br>• <b>Победа:</b> побеждает участник с наибольшим количеством очков в конце раунда."
+      },
+      2: {
+        title: "Кроссворд 📝",
+        icon: "📝",
+        text: "<b>Цель игры:</b> Отгадывайте слова по подсказкам и заполняйте сетку кроссворда.<br><br>• <b>Участники:</b> от 2 до 10 человек.<br>• <b>Очки:</b> за каждое правильно угаданное слово начисляются баллы.<br>• <b>Победа:</b> игрок, разгадавший больше всех слов, занимает 1-е место!"
+      },
+      3: {
+        title: "Поле Чудес 🗣️",
+        icon: "🗣️",
+        text: "<b>Цель игры:</b> Вращайте барабан, открывайте буквы и назовите зашифрованное слово целиком!<br><br>• <b>Участники:</b> от 2 до 5 человек.<br>• <b>Секторы:</b> на барабане есть очки, призы и сектор «Банкрот».<br>• <b>Победа:</b> побеждает тот, кто первым отгадает главное слово!"
+      },
+      4: {
+        title: "Крестики-нолики ❌⭕",
+        icon: "❌⭕",
+        text: "<b>Цель игры:</b> Соберите линию из трёх своих символов (по горизонтали, вертикали или диагонали) раньше соперника!<br><br>• <b>Формат:</b> Турнир или дуэль 1 на 1.<br>• <b>Автоматический подбор:</b> если набралось 2 игрока — начинается дуэль. Если 4 или 8 игроков — запускается турнирная сетка (полуфиналы и финал)!<br>• <b>Смена сторон:</b> при каждом реванше право первого хода (Крестик ❌) переходит ко второму игроку!"
+      },
+      5: {
+        title: "Мемори 🧠",
+        icon: "🧠",
+        text: "<b>Цель игры:</b> Тренируйте память! Открывайте парные карточки на скорость.<br><br>• <b>Участники:</b> от 2 до 4 человек.<br>• <b>Ход:</b> открывайте по 2 карточки. Если картинки совпали — они остаются открытыми, а вы получаете очки!<br>• <b>Победа:</b> побеждает набравший наибольшее число пар."
+      },
+      6: {
+        title: "Найди отличия 🔍",
+        icon: "🔍",
+        text: "<b>Цель игры:</b> Найдите единственный отличающийся смайлик на скорость быстрее соперников!<br><br>• <b>Участники:</b> от 2 до 10 человек.<br>• <b>Раунды:</b> серия быстрых раундов на внимательность.<br>• <b>Победа:</b> самый внимательный и быстрый игрок забирает кубок!"
+      },
+      7: {
+        title: "Нарезка 🔪",
+        icon: "🔪",
+        text: "<b>Цель игры:</b> Нарезайте летающие ингредиенты и избегайте препятствий!<br><br>• <b>Участники:</b> от 2 до 8 человек.<br>• <b>Очки:</b> за каждый нарезанный фрукт начисляются комбо-очки.<br>• <b>Победа:</b> игрок с самым высоким комбо побеждает."
+      },
+      8: {
+        title: "Торт до Небес 🎂",
+        icon: "🎂",
+        text: "<b>Цель игры:</b> Складывайте коржи торта точно друг на друга и постройте самый высокий небоскрёб из торта!<br><br>• <b>Участники:</b> от 2 до 8 человек.<br>• <b>Точность:</b> неровно положенные части коржа срезаются.<br>• <b>Победа:</b> побеждает построивший самый высокий торт!"
+      },
+      9: {
+        title: "Шашки 🏁",
+        icon: "🏁",
+        text: "<b>Цель игры:</b> Классическая дуэль в русские шашки 1 на 1.<br><br>• <b>Правила:</b> ход по диагонали вперёд, взятие назад разрешено, дамка ходит на любое число клеток.<br>• <b>Победа:</b> срубите все шашки соперника или заблокируйте его ходы!"
+      },
+      10: {
+        title: "Шахматы ♟️",
+        icon: "♟️",
+        text: "<b>Цель игры:</b> Классические шахматы 1 на 1.<br><br>• <b>Правила:</b> международные правила ФИДЕ, таймер на ход.<br>• <b>Победа:</b> поставьте мат королю соперника или выиграйте по времени!"
+      }
+    };
+
+    const gRule = rules[gameId] || {
+      title: "Правила игры",
+      icon: "📋",
+      text: "Правила и цели игры: играйте честно, соблюдайте правила заведения и получайте призы за победу!"
+    };
+
+    const modal = document.getElementById('visitor-rules-modal');
+    const iconEl = document.getElementById('visitor-rules-icon');
+    const titleEl = document.getElementById('visitor-rules-title');
+    const contentEl = document.getElementById('visitor-rules-content');
+
+    if (iconEl) iconEl.innerText = gRule.icon;
+    if (titleEl) titleEl.innerText = gRule.title;
+    if (contentEl) contentEl.innerHTML = gRule.text;
+
+    if (modal) {
+      modal.classList.add('active');
+      modal.style.display = 'flex';
+    }
   }
 
   closeVisitorRulesModal() {
