@@ -6140,41 +6140,72 @@ class WaitPlayApp {
         }
       }
     } else if (data.type === 'queue_join') {
+      const targetGId = Number(data.gameId);
+      const myGId = Number(this.state.visitorSelectedGameId);
+
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[data.senderId] = {
         ...(data.profile || {}),
         id: data.senderId,
-        gameId: data.gameId,
+        gameId: targetGId,
         joinTime: data.timestamp || Date.now()
       };
-      if (this.state.visitorSelectedGameId === data.gameId) {
-        if (data.queueEndTime && (!this.queueEndTime || data.queueEndTime < this.queueEndTime)) {
-          this.queueEndTime = data.queueEndTime;
-          this.sharedQueueEndTime = data.queueEndTime;
-        } else if (this.queueEndTime) {
+
+      if (myGId === targetGId) {
+        this.updateLiveQueueUI();
+
+        // If I am host, reply immediately with current tick
+        if (this.isQueueHost && typeof this.queueRemainingSec === 'number') {
           this.sendNetworkMessage({
-            type: 'queue_sync_timer',
-            gameId: data.gameId,
-            queueEndTime: this.queueEndTime,
+            type: 'queue_tick',
+            gameId: targetGId,
+            hostId: this.myPlayerId,
+            remainingSec: this.queueRemainingSec,
             queuePlayers: this.queuePlayers
           });
         }
-        this.updateLiveQueueUI();
       }
-    } else if (data.type === 'queue_sync_timer') {
-      if (this.state.visitorSelectedGameId === data.gameId && data.queueEndTime) {
-        this.queueEndTime = data.queueEndTime;
-        this.sharedQueueEndTime = data.queueEndTime;
+    } else if (data.type === 'queue_tick') {
+      const targetGId = Number(data.gameId);
+      const myGId = Number(this.state.visitorSelectedGameId);
+
+      if (myGId === targetGId) {
+        if (!this.isQueueHost) {
+          this.queueRemainingSec = data.remainingSec;
+          const timerEl = document.getElementById('lobby-countdown-timer');
+          if (timerEl) timerEl.innerText = `${data.remainingSec} сек`;
+        }
+
+        if (data.queuePlayers && typeof data.queuePlayers === 'object') {
+          this.queuePlayers = { ...this.queuePlayers, ...data.queuePlayers };
+          this.updateLiveQueueUI();
+        }
+      }
+    } else if (data.type === 'queue_match_start') {
+      const targetGId = Number(data.gameId);
+      const myGId = Number(this.state.visitorSelectedGameId);
+
+      if (myGId === targetGId) {
+        clearInterval(this.state.lobbyCountdown);
         if (data.queuePlayers) {
           this.queuePlayers = { ...this.queuePlayers, ...data.queuePlayers };
         }
-        this.updateLiveQueueUI();
+        const overlay = document.getElementById('lobby-queue-overlay');
+        if (overlay) {
+          overlay.style.display = 'none';
+          overlay.innerHTML = '';
+        }
+        const total = Object.keys(this.queuePlayers || {}).length;
+        this.startActiveGame(total >= 2 ? total : 2);
       }
     } else if (data.type === 'queue_leave') {
+      const targetGId = Number(data.gameId);
+      const myGId = Number(this.state.visitorSelectedGameId);
+
       if (this.queuePlayers && this.queuePlayers[data.playerId || data.senderId]) {
         delete this.queuePlayers[data.playerId || data.senderId];
       }
-      if (this.state.visitorSelectedGameId === data.gameId) {
+      if (myGId === targetGId) {
         this.updateLiveQueueUI();
       }
     } else if (data.type === 'game_exit') {
@@ -6343,6 +6374,7 @@ class WaitPlayApp {
 
     visitorJoinLobby(gameId) {
     try {
+      const gId = Number(gameId);
       this.ensureMyPlayerProfile();
       
       if (!this.mqttClient || !this.mqttClient.connected) {
@@ -6354,27 +6386,29 @@ class WaitPlayApp {
         return;
       }
       
-      this.state.visitorSelectedGameId = gameId;
+      this.state.visitorSelectedGameId = gId;
       this.saveState();
-      
-      // Determine Shared Queue End Time
-      let queueEnd = Date.now() + 15000;
-      if (this.sharedQueueEndTime && (this.sharedQueueEndTime - Date.now() > 1000)) {
-        queueEnd = this.sharedQueueEndTime;
-      } else {
-        this.sharedQueueEndTime = queueEnd;
-      }
-      this.queueEndTime = queueEnd;
 
+      // Check if existing queue players already exist in corridor
+      const activeInGame = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && Number(p.gameId) === gId && p.inQueue);
+      
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
-        gameId: gameId,
+        gameId: gId,
         joinTime: Date.now()
       };
 
-      const initialSec = Math.max(1, Math.ceil((this.queueEndTime - Date.now()) / 1000));
+      if (activeInGame.length > 0) {
+        // Guest mode: join existing host
+        this.isQueueHost = false;
+        this.queueRemainingSec = 14;
+      } else {
+        // Host mode: start master countdown
+        this.isQueueHost = true;
+        this.queueRemainingSec = 15;
+      }
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6385,7 +6419,7 @@ class WaitPlayApp {
             <div class="lobby-radar-pulse"></div>
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${initialSec} сек</div>
+          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${this.queueRemainingSec} сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
@@ -6394,26 +6428,40 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
+      // Announce join
       this.sendNetworkMessage({
         type: 'queue_join',
-        gameId: gameId,
+        gameId: gId,
         profile: this.myPlayerProfile,
-        queueEndTime: this.queueEndTime
+        isHost: this.isQueueHost,
+        remainingSec: this.queueRemainingSec
       });
 
+      // Master Countdown Interval
       clearInterval(this.state.lobbyCountdown);
       this.state.lobbyCountdown = setInterval(() => {
-        const remainingMs = this.queueEndTime - Date.now();
-        const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+        this.queueRemainingSec--;
+        if (this.queueRemainingSec < 0) this.queueRemainingSec = 0;
 
         const timerEl = document.getElementById('lobby-countdown-timer');
-        if (timerEl) timerEl.innerText = `${remainingSec} сек`;
+        if (timerEl) timerEl.innerText = `${this.queueRemainingSec} сек`;
 
-        if (remainingMs <= 0) {
-          clearInterval(this.state.lobbyCountdown);
-          this.finishQueueMatchmaking(gameId);
+        // If host, broadcast tick to sync all joining phones
+        if (this.isQueueHost) {
+          this.sendNetworkMessage({
+            type: 'queue_tick',
+            gameId: gId,
+            hostId: this.myPlayerId,
+            remainingSec: this.queueRemainingSec,
+            queuePlayers: this.queuePlayers
+          });
         }
-      }, 500);
+
+        if (this.queueRemainingSec <= 0) {
+          clearInterval(this.state.lobbyCountdown);
+          this.finishQueueMatchmaking(gId);
+        }
+      }, 1000);
     } catch(e) {
       console.error("Error in visitorJoinLobby:", e);
     }
@@ -6421,8 +6469,8 @@ class WaitPlayApp {
 
   updateLiveQueueUI() {
     try {
-      const gameId = this.state.visitorSelectedGameId;
-      const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
+      const gId = Number(this.state.visitorSelectedGameId);
+      const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && Number(p.gameId) === gId);
       const count = Math.max(1, inQueue.length);
 
       const lobbyCounter = document.getElementById('visitor-lobby-players-count');
@@ -6445,10 +6493,10 @@ class WaitPlayApp {
   visitorLeaveQueue() {
     try {
       clearInterval(this.state.lobbyCountdown);
-      const exitingGameId = this.state.visitorSelectedGameId;
+      const exitingGameId = Number(this.state.visitorSelectedGameId);
       this.state.visitorSelectedGameId = null;
-      this.queueEndTime = null;
-      this.sharedQueueEndTime = null;
+      this.isQueueHost = false;
+      this.queueRemainingSec = null;
       this.queuePlayers = {};
 
       const overlay = document.getElementById('lobby-queue-overlay');
@@ -6473,6 +6521,8 @@ class WaitPlayApp {
         lobbyPanel.style.display = 'flex';
       }
 
+      this.broadcastNetworkPresence();
+
       this.sendNetworkMessage({
         type: 'queue_leave',
         gameId: exitingGameId,
@@ -6487,11 +6537,10 @@ class WaitPlayApp {
 
   finishQueueMatchmaking(gameId) {
     try {
+      const gId = Number(gameId);
       const overlay = document.getElementById('lobby-queue-overlay');
-      const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
+      const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && Number(p.gameId) === gId);
       const totalLiveInQueue = inQueue.length;
-
-      this.sharedQueueEndTime = null;
 
       if (totalLiveInQueue < 2) {
         if (overlay) {
@@ -6503,6 +6552,15 @@ class WaitPlayApp {
           `;
         }
         return;
+      }
+
+      // If host, announce synchronized match start
+      if (this.isQueueHost) {
+        this.sendNetworkMessage({
+          type: 'queue_match_start',
+          gameId: gId,
+          queuePlayers: this.queuePlayers
+        });
       }
 
       if (overlay) {
