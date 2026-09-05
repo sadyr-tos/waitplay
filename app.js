@@ -320,6 +320,13 @@ class WaitPlayApp {
     };
   }
 
+  normalizeVenueId(id) {
+    if (!id || id === 'main' || id === 'loc_main' || id === 'undefined' || id === 'null' || id === 'default') {
+      return 'br_main';
+    }
+    return id;
+  }
+
   init() {
     try {
       this.loadState();
@@ -330,7 +337,7 @@ class WaitPlayApp {
 
       if (roleParam === 'guest' || locParam) {
         // GUEST / VISITOR ROUTING
-        const targetLoc = locParam || this.state.activeBranchId || 'loc_main';
+        const targetLoc = this.normalizeVenueId(locParam || this.state.activeBranchId);
         this.state.visitorConnectedBranchId = targetLoc;
         
         const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
@@ -6007,8 +6014,7 @@ class WaitPlayApp {
   }
 
   initRealtimeNetwork(venueId) {
-    if (!venueId) venueId = 'loc_main';
-    this.networkVenueId = venueId;
+    this.networkVenueId = this.normalizeVenueId(venueId || this.state.visitorConnectedBranchId);
     this.ensureMyPlayerProfile();
 
     this.livePlayers = this.livePlayers || {};
@@ -6378,7 +6384,7 @@ class WaitPlayApp {
       this.ensureMyPlayerProfile();
       
       if (!this.mqttClient || !this.mqttClient.connected) {
-        this.initRealtimeNetwork(this.state.visitorConnectedBranchId || 'loc_main');
+        this.initRealtimeNetwork(this.state.visitorConnectedBranchId);
       }
 
       if (this.state.manualTestingMode) {
@@ -10400,7 +10406,7 @@ class WaitPlayApp {
 
   updateAdminQrCode() {
     try {
-      const branchId = this.state.activeBranchId || "main";
+      const branchId = this.normalizeVenueId(this.state.activeBranchId);
       const baseUrl = window.location.origin + window.location.pathname;
       const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
 
@@ -10415,7 +10421,7 @@ class WaitPlayApp {
 
   shareBranchGameLink() {
     try {
-      const branchId = this.state.activeBranchId || "main";
+      const branchId = this.normalizeVenueId(this.state.activeBranchId);
       const baseUrl = window.location.origin + window.location.pathname;
       const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
 
@@ -10709,7 +10715,7 @@ class WaitPlayApp {
   adminDownloadPrintPDF() {
     try {
       const branchName = this.state.activeBranchName || "WaitPlay";
-      const branchId = this.state.activeBranchId || "main";
+      const branchId = this.normalizeVenueId(this.state.activeBranchId);
       const baseUrl = window.location.origin + window.location.pathname;
       const guestUrl = baseUrl + "?role=guest&loc=" + branchId;
       const qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&data=" + encodeURIComponent(guestUrl);
