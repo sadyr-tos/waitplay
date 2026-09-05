@@ -730,9 +730,42 @@ class WaitPlayApp {
     }
   }
 
+  getActiveBranchFullConfig() {
+    return {
+      branchId: this.state.activeBranchId,
+      branchName: this.state.activeBranchName,
+      tttTurnLimit: this.state.tttTurnLimit || 'none',
+      tttDifficulty: this.state.tttDifficulty || 'normal',
+      tttMaxDraws: this.state.tttMaxDraws || 3,
+      templates: this.state.templates || [],
+      quizTimeLimit: this.state.quizTimeLimit || 15,
+      crosswordWords: this.state.crosswordWords || [],
+      crosswordDifficulty: this.state.crosswordDifficulty || 'normal',
+      guessWordCustomWord: this.state.guessWordCustomWord || '',
+      guessWordCustomClue: this.state.guessWordCustomClue || '',
+      guessWordDifficulty: this.state.guessWordDifficulty || 'normal',
+      games: this.state.games || DEFAULT_GAMES
+    };
+  }
+
+  broadcastBranchConfig() {
+    try {
+      if (this.mqttClient && this.mqttClient.connected && this.state.activeBranchId) {
+        this.sendNetworkMessage({
+          type: 'branch_config_sync',
+          branchId: this.state.activeBranchId,
+          config: this.getActiveBranchFullConfig()
+        });
+      }
+    } catch(e) {
+      console.error("Error in broadcastBranchConfig:", e);
+    }
+  }
+
   saveState() {
     try {
       this.syncActiveBranchToDatabase();
+      this.broadcastBranchConfig();
 
       // Sync active account to logged list if it exists and is paid
       if (this.state.email && this.state.activeBranchId) {
@@ -5845,6 +5878,21 @@ class WaitPlayApp {
 
   getVisitorConnectedBranch() {
     if (!this.state.visitorConnectedBranchId) return null;
+
+    if (this.visitorBranchConfig && (this.visitorBranchConfig.branchId === this.state.visitorConnectedBranchId || this.visitorBranchConfig.id === this.state.visitorConnectedBranchId)) {
+      return this.visitorBranchConfig;
+    }
+
+    try {
+      const cached = localStorage.getItem('cached_branch_config_' + this.state.visitorConnectedBranchId);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && (parsed.branchId === this.state.visitorConnectedBranchId || parsed.id === this.state.visitorConnectedBranchId)) {
+          this.visitorBranchConfig = parsed;
+          return parsed;
+        }
+      }
+    } catch(e) {}
     
     this.state.databaseClients = this.state.databaseClients || [];
     for (const client of this.state.databaseClients) {
@@ -5857,12 +5905,24 @@ class WaitPlayApp {
     if (this.state.activeBranchId === this.state.visitorConnectedBranchId) {
       return {
         id: this.state.activeBranchId,
+        branchId: this.state.activeBranchId,
         name: this.state.activeBranchName,
+        branchName: this.state.activeBranchName,
         welcomeMsg: this.state.welcomeMsg,
         subscription: this.state.subscription,
         lat: this.state.venueCoords.lat,
         lng: this.state.venueCoords.lng,
-        games: this.state.games
+        games: this.state.games,
+        tttTurnLimit: this.state.tttTurnLimit || 'none',
+        tttDifficulty: this.state.tttDifficulty || 'normal',
+        tttMaxDraws: this.state.tttMaxDraws || 3,
+        templates: this.state.templates || [],
+        quizTimeLimit: this.state.quizTimeLimit || 15,
+        crosswordWords: this.state.crosswordWords || [],
+        crosswordDifficulty: this.state.crosswordDifficulty || 'normal',
+        guessWordCustomWord: this.state.guessWordCustomWord || '',
+        guessWordCustomClue: this.state.guessWordCustomClue || '',
+        guessWordDifficulty: this.state.guessWordDifficulty || 'normal'
       };
     }
     return null;
@@ -6469,1128 +6529,35 @@ class WaitPlayApp {
     this.state.activeGameScore = 0;
     this.state.activeGameQIndex = 0;
 
+    const gameId = this.state.visitorSelectedGameId;
+
     const listContainer = document.getElementById('visitor-game-players-list');
     if (listContainer && listContainer.parentElement) {
-      listContainer.parentElement.style.display = (this.state.visitorSelectedGameId === 11 || this.state.visitorSelectedGameId === 3 || this.state.visitorSelectedGameId === 8) ? 'none' : 'block';
+      listContainer.parentElement.style.display = 'block';
     }
 
-    if (this.state.visitorSelectedGameId === 3) {
-      document.getElementById('visitor-game-score').innerText = "Прогресс: 0%";
-      this.initGuestStickmanRace(totalPlayers);
-      return;
-    }
-
-    if (this.state.visitorSelectedGameId === 8) {
-      this.initSlicingGame(totalPlayers);
-      return;
-    }
-
-    if (this.state.visitorSelectedGameId === 11) {
-      let isMatched = true;
-      if (totalPlayers % 2 === 1) {
-        const leftoverIdx = Math.floor(Math.random() * totalPlayers);
-        if (leftoverIdx === 0) {
-          isMatched = false;
-        }
-      }
-
-      if (!isMatched) {
-        this.setVisitorViewPanel('game');
-        
-        const typeLabel = document.getElementById('visitor-game-type-label');
-        if (typeLabel) typeLabel.innerText = "ПОИСК СОПЕРНИКА 🔍";
-        
-        const qIndexEl = document.getElementById('visitor-game-q-index');
-        if (qIndexEl) qIndexEl.innerText = "Матчмейкинг";
-        
-        const scoreEl = document.getElementById('visitor-game-score');
-        if (scoreEl) scoreEl.innerText = "";
-        
-        const textLabel = document.getElementById('visitor-game-question-text');
-        if (textLabel) {
-          textLabel.innerHTML = `
-            <div style="text-align:center; padding: 20px 10px;">
-              <div style="font-size:42px; margin-bottom:12px;">🚫</div>
-              <div style="font-size:16px; font-weight:800; color:var(--error); margin-bottom:8px;">Пара не найдена</div>
-              <div style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:20px;">
-                К сожалению, для вас не нашлось свободного соперника в этой комнате (нечетное количество участников).
-              </div>
-              <button class="btn btn-secondary" onclick="app.visitorLeaveQueue()" style="width:100%; padding:10px; font-weight:800; font-size:12px; margin:0;">
-                ↩️ Вернуться в лобби
-              </button>
-            </div>
-          `;
-        }
-        
-        const optionsBox = document.getElementById('visitor-game-options');
-        if (optionsBox) {
-          optionsBox.style.display = 'none';
-          optionsBox.innerHTML = '';
-        }
-        return;
-      }
-
-      document.getElementById('visitor-game-score').innerText = `Дамки: 0`;
-      this.initGuestCheckers();
-      return;
-    }
-
-    if (this.state.visitorSelectedGameId === 2) {
-      const branch = this.getVisitorConnectedBranch();
-      document.getElementById('visitor-game-score').innerText = `Очки: 0`;
-      
-      const animalNames = ["Панда", "Лиса", "Медведь", "Тигр", "Лев", "Зайка", "Обезьянка", "Коала", "Лягушка", "Котёнок", "Щенок", "Цыплёнок"];
-      const animalEmojis = ["🐼", "🦊", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔"];
-      
-      this.state.simulatedPlayers = [];
-      for (let i = 0; i < totalPlayers - 1; i++) {
-        const idx = i % animalNames.length;
-        this.state.simulatedPlayers.push({
-          name: animalNames[idx],
-          avatar: animalEmojis[idx],
-          score: 0
-        });
-      }
-      
-      this.renderActiveGameQuestion();
-      return;
-    }
-
-    if (this.state.visitorSelectedGameId === 4) {
-      document.getElementById('visitor-game-score').innerText = `Раунд: 1`;
+    if (gameId === 4) {
       this.initTTFTournament();
       return;
     }
 
-    if (this.state.visitorSelectedGameId === 5) {
-      document.getElementById('visitor-game-score').innerText = `Очки: 0`;
-      this.state.simulatedPlayers = [];
-      const animalNames = ["Панда", "Лиса", "Медведь", "Тигр", "Лев", "Зайка", "Обезьянка", "Коала", "Лягушка", "Котёнок", "Щенок", "Цыплёнок"];
-      const animalEmojis = ["🐼", "🦊", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔"];
-      
-      for (let i = 0; i < totalPlayers - 1; i++) {
-        const idx = i % animalNames.length;
-        this.state.simulatedPlayers.push({
-          name: animalNames[idx],
-          avatar: animalEmojis[idx],
-          score: 0
-        });
-      }
-      
-      this.renderActiveGameQuestion();
+    if (gameId === 1) {
+      this.initLiveQuizGame(totalPlayers);
       return;
     }
 
-
-    if (this.state.visitorSelectedGameId === 6) {
-      document.getElementById('visitor-game-score').innerText = `Пары: 0`;
-      this.initGuestMemory(totalPlayers);
+    if (gameId === 2) {
+      this.initLiveCrosswordGame(totalPlayers);
       return;
     }
 
-    if (this.state.visitorSelectedGameId === 10) {
-      document.getElementById('visitor-game-score').innerText = `Очки: 0`;
-      this.initGuessWordGame(totalPlayers);
+    if (gameId === 3) {
+      this.initLiveGuessWordGame(totalPlayers);
       return;
     }
 
-    document.getElementById('visitor-game-score').innerText = `Побед: 0`;
-
-    if (this.state.isDemoTest) {
-      clearTimeout(this.state.demoTimer);
-    }
-
-    const animalNames = ["Панда", "Лиса", "Медведь", "Тигр", "Лев", "Зайка", "Обезьянка", "Коала", "Лягушка", "Котёнок", "Щенок", "Цыплёнок"];
-    const animalEmojis = ["🐼", "🦊", "🐻", "🐯", "🦁", "🐰", "🐵", "🐨", "🐸", "🐱", "🐶", "🐔"];
-    
-    this.state.simulatedPlayers = [];
-    for (let i = 0; i < totalPlayers - 1; i++) {
-      const idx = i % animalNames.length;
-      this.state.simulatedPlayers.push({
-        name: animalNames[idx],
-        avatar: animalEmojis[idx],
-        score: 0
-      });
-    }
-
+    // Default fallback
     this.renderActiveGameQuestion();
-  }
-
-initTTFTournament(isNextRound = false) {
-    this.ensureMyPlayerProfile();
-    this.closeTTFVictoryModal();
-
-    let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
-    if (!isNextRound) currentRound = 1;
-
-    let myScore = (this.state.tttTournament && this.state.tttTournament.myScore) || 0;
-    let oppScore = (this.state.tttTournament && this.state.tttTournament.oppScore) || 0;
-    let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
-    if (!isNextRound) { myScore = 0; oppScore = 0; drawsCount = 0; }
-
-    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
-
-    // Determine Host vs Guest
-    let isHost = true;
-    if (!isNextRound) {
-      this.currentMatchSalt = Math.random();
-    }
-    const myKey = (this.currentMatchSalt || 0.5) + '_' + this.myPlayerId;
-
-    let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
-    let oppName = '⏳ Ожидание игрока 2...';
-    let status = 'waiting';
-
-    const isOddRound = (currentRound % 2 === 1);
-
-    if (otherPlayers.length > 0) {
-      const other = otherPlayers[0];
-      const otherKey = (this.currentMatchSalt || 0.5) + '_' + (other.id || 'x');
-      isHost = (myKey <= otherKey);
-      oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
-      status = 'playing';
-
-      this.sendNetworkMessage({
-        type: 'ttt_paired',
-        gameId: 4,
-        hostId: (isHost ? this.myPlayerId : other.id),
-        hostProfile: (isHost ? this.myPlayerProfile : other),
-        guestId: (isHost ? other.id : this.myPlayerId),
-        guestProfile: (isHost ? other : this.myPlayerProfile),
-        round: currentRound
-      });
-    } else {
-      this.sendNetworkMessage({
-        type: 'ttt_join',
-        gameId: 4,
-        profile: this.myPlayerProfile
-      });
-    }
-
-    // Alternating roles: Odd rounds Host is X (starts first), Even rounds Host is O (Guest starts first!)
-    let mySymbol = 'X';
-    let oppSymbol = 'O';
-    if (isHost) {
-      mySymbol = isOddRound ? 'X' : 'O';
-      oppSymbol = isOddRound ? 'O' : 'X';
-    } else {
-      mySymbol = isOddRound ? 'O' : 'X';
-      oppSymbol = isOddRound ? 'X' : 'O';
-    }
-
-    this.state.tttTournament = {
-      round: currentRound,
-      myScore: myScore,
-      oppScore: oppScore,
-      drawsCount: drawsCount,
-      isHost: isHost,
-      mySymbol: mySymbol,
-      oppSymbol: oppSymbol,
-      myName: myName,
-      oppName: oppName,
-      board: Array(9).fill(null),
-      status: status,
-      winner: null,
-      winningLine: null
-    };
-
-    const scoreEl = document.getElementById('visitor-game-score');
-    if (scoreEl) scoreEl.innerText = `Раунд: ${currentRound}`;
-
-    this.renderActiveGameQuestion();
-  }
-
-  handleRemoteTTFJoin(data) {
-    const t = this.state.tttTournament;
-    if (!t) return;
-
-    const guest = data.profile || { name: 'Игрок 2', avatar: '🐺', id: data.senderId };
-    t.oppName = `${guest.avatar} ${guest.name}`;
-    t.status = 'playing';
-
-    this.sendNetworkMessage({
-      type: 'ttt_paired',
-      gameId: 4,
-      hostId: this.myPlayerId,
-      hostProfile: this.myPlayerProfile,
-      guestId: data.senderId,
-      guestProfile: guest,
-      round: t.round
-    });
-
-    this.renderActiveGameQuestion();
-  }
-
-  handleRemoteTTFPaired(data) {
-    const t = this.state.tttTournament;
-    if (!t) return;
-
-    const round = data.round || t.round || 1;
-    const isOddRound = (round % 2 === 1);
-
-    if (this.myPlayerId === data.hostId) {
-      t.isHost = true;
-      t.mySymbol = isOddRound ? 'X' : 'O';
-      t.oppSymbol = isOddRound ? 'O' : 'X';
-      t.myName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
-      t.oppName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
-      t.status = 'playing';
-    } else if (this.myPlayerId === data.guestId) {
-      t.isHost = false;
-      t.mySymbol = isOddRound ? 'O' : 'X';
-      t.oppSymbol = isOddRound ? 'X' : 'O';
-      t.myName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
-      t.oppName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
-      t.status = 'playing';
-    }
-
-    this.renderActiveGameQuestion();
-  }
-
-  renderTTFBoard(optionsBox, textLabel) {
-    const t = this.state.tttTournament;
-    if (!t) {
-      this.initTTFTournament();
-      return;
-    }
-
-    let countX = 0, countO = 0;
-    t.board.forEach(cell => {
-      if (cell === 'X') countX++;
-      if (cell === 'O') countO++;
-    });
-
-    const activeSymbol = (countX === countO) ? 'X' : 'O';
-    const isWaiting = (t.status === 'waiting');
-    const isMyTurn = (!isWaiting && !t.winner && activeSymbol === t.mySymbol);
-
-    let turnIndicator = '';
-    if (isWaiting) {
-      turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">⏳ Ожидание второго живого игрока...</span>`;
-    } else if (t.winner) {
-      turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">🏁 Раунд завершен!</span>`;
-    } else if (isMyTurn) {
-      turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:14px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
-    } else {
-      turnIndicator = `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`;
-    }
-
-    const scoreLine = `🏆 Счёт серии: ${t.myScore} : ${t.oppScore} (Ничьих: ${t.drawsCount})`;
-
-    if (textLabel) {
-      textLabel.innerHTML = `
-        <div style="text-align:center;">
-          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:3px;">🎮 КРЕСТИКИ-НОЛИКИ (РАУНД ${t.round})</div>
-          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:4px;">
-            <span style="font-weight:800; color:${t.mySymbol === 'X' ? 'var(--primary)' : 'var(--gold)'}">${t.myName} (${t.mySymbol})</span>
-            <span style="color:var(--gold); font-size:11px;">VS</span>
-            <span style="font-weight:800; color:${t.oppSymbol === 'X' ? 'var(--primary)' : 'var(--gold)'}">${t.oppName} (${t.oppSymbol})</span>
-          </div>
-          <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">${scoreLine}</div>
-          <div style="min-height:22px;">${turnIndicator}</div>
-        </div>
-      `;
-    }
-
-    if (optionsBox) {
-      optionsBox.innerHTML = '';
-      optionsBox.style.display = 'grid';
-      optionsBox.style.gridTemplateColumns = 'repeat(3, 1fr)';
-      optionsBox.style.gap = '8px';
-      optionsBox.style.maxWidth = '280px';
-      optionsBox.style.margin = '12px auto 0 auto';
-
-      for (let i = 0; i < 9; i++) {
-        const cell = t.board[i];
-        const btn = document.createElement('button');
-        btn.style.cssText = 'height: 75px; font-size: 32px; font-weight: 900; background: #18142c; border: 2px solid var(--border-light); border-radius: 12px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: all 0.2s; margin: 0;';
-        
-        const isWinningCell = t.winningLine && t.winningLine.includes(i);
-
-        if (cell === 'X') {
-          btn.innerText = '❌';
-          if (isWinningCell) {
-            btn.style.border = '3px solid #10b981';
-            btn.style.background = 'rgba(16, 185, 129, 0.35)';
-            btn.style.boxShadow = '0 0 15px #10b981';
-            btn.style.transform = 'scale(1.05)';
-          } else {
-            btn.style.borderColor = 'var(--primary)';
-            btn.style.background = 'rgba(139, 92, 246, 0.15)';
-          }
-          btn.disabled = true;
-        } else if (cell === 'O') {
-          btn.innerText = '⭕';
-          if (isWinningCell) {
-            btn.style.border = '3px solid #10b981';
-            btn.style.background = 'rgba(16, 185, 129, 0.35)';
-            btn.style.boxShadow = '0 0 15px #10b981';
-            btn.style.transform = 'scale(1.05)';
-          } else {
-            btn.style.borderColor = 'var(--gold)';
-            btn.style.background = 'rgba(245, 158, 11, 0.15)';
-          }
-          btn.disabled = true;
-        } else {
-          btn.innerText = '';
-          if (isMyTurn) {
-            btn.onclick = () => this.handleLiveTTFCellClick(i);
-            btn.style.borderColor = 'rgba(139, 92, 246, 0.5)';
-          } else {
-            btn.style.cursor = 'not-allowed';
-            btn.style.opacity = '0.6';
-            btn.disabled = true;
-          }
-        }
-        optionsBox.appendChild(btn);
-      }
-    }
-  }
-
-  handleLiveTTFCellClick(index) {
-    const t = this.state.tttTournament;
-    if (!t || t.board[index] !== null || t.winner || t.status !== 'playing') return;
-
-    let countX = 0, countO = 0;
-    t.board.forEach(cell => {
-      if (cell === 'X') countX++;
-      if (cell === 'O') countO++;
-    });
-    const activeSymbol = (countX === countO) ? 'X' : 'O';
-    if (activeSymbol !== t.mySymbol) return;
-
-    t.board[index] = t.mySymbol;
-    this.playAudioTone('click');
-
-    this.sendNetworkMessage({
-      type: 'ttt_move',
-      gameId: 4,
-      cellIndex: index,
-      symbol: t.mySymbol,
-      board: t.board
-    });
-
-    const winResult = this.checkTTFWinner(t.board);
-    const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
-
-    if (winResult) {
-      t.winner = winResult.winner;
-      t.winningLine = winResult.line;
-      if (winResult.winner === t.mySymbol) {
-        t.myScore++;
-      } else {
-        t.oppScore++;
-      }
-      this.renderActiveGameQuestion();
-      setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
-    } else if (filledCells === 9) {
-      t.winner = 'draw';
-      t.winningLine = null;
-      t.drawsCount++;
-      this.renderActiveGameQuestion();
-      setTimeout(() => this.showTTFVictoryModal('draw'), 750);
-    } else {
-      this.renderActiveGameQuestion();
-    }
-  }
-
-  handleRemoteTTFMove(data) {
-    const t = this.state.tttTournament;
-    if (!t || data.gameId !== 4) return;
-
-    if (Array.isArray(data.board)) {
-      t.board = [...data.board];
-    } else {
-      t.board[data.cellIndex] = data.symbol;
-    }
-    this.playAudioTone('click');
-
-    const winResult = this.checkTTFWinner(t.board);
-    const filledCells = t.board.filter(c => c === 'X' || c === 'O').length;
-
-    if (winResult) {
-      t.winner = winResult.winner;
-      t.winningLine = winResult.line;
-      if (winResult.winner === t.mySymbol) {
-        t.myScore++;
-      } else {
-        t.oppScore++;
-      }
-      this.renderActiveGameQuestion();
-      setTimeout(() => this.showTTFVictoryModal(winResult.winner), 750);
-    } else if (filledCells === 9) {
-      t.winner = 'draw';
-      t.winningLine = null;
-      t.drawsCount++;
-      this.renderActiveGameQuestion();
-      setTimeout(() => this.showTTFVictoryModal('draw'), 750);
-    } else {
-      this.renderActiveGameQuestion();
-    }
-  }
-
-  handleRemoteTTFRestart(data) {
-    if (data.gameId === 4) {
-      this.closeTTFVictoryModal();
-      this.initTTFTournament(true);
-    }
-  }
-
-  checkTTFWinner(board) {
-    const lines = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8],
-      [0, 3, 6], [1, 4, 7], [2, 5, 8],
-      [0, 4, 8], [2, 4, 6]
-    ];
-    for (const [a, b, c] of lines) {
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        return { winner: board[a], line: [a, b, c] };
-      }
-    }
-    return null;
-  }
-
-  showTTFVictoryModal(result) {
-    this.closeTTFVictoryModal();
-    const t = this.state.tttTournament;
-
-    let icon = '🏆';
-    let title = 'ПОЗДРАВЛЯЕМ! ВЫ ПОБЕДИЛИ!';
-    let subtitle = 'Вы собрали 3 в ряд и выиграли этот раунд!';
-    let titleColor = 'var(--gold)';
-
-    if (result === 'draw') {
-      icon = '🤝';
-      title = 'БОЕВАЯ НИЧЬЯ!';
-      subtitle = 'Все 9 клеток заполнены, победитель не определен.';
-      titleColor = '#ffffff';
-    } else if (t && result === t.mySymbol) {
-      icon = '🏆';
-      title = '🎉 ПОЗДРАВЛЯЕМ! ВЫ ПОБЕДИЛИ!';
-      subtitle = 'Вы собрали победную линию из трёх символов!';
-      titleColor = 'var(--success)';
-      this.showVisitorToast("🎉 ВЫ ПОБЕДИЛИ В РАУНДЕ!", false);
-    } else {
-      icon = '👏';
-      title = `👏 Раунд выиграл ${t ? t.oppName : 'соперник'}`;
-      subtitle = 'Возьмите реванш в следующем раунде!';
-      titleColor = 'var(--gold)';
-      this.showVisitorToast("Раунд выиграл соперник 👏", false);
-    }
-
-    const scoreText = `🏆 Счёт серии: ${t ? t.myScore : 0} : ${t ? t.oppScore : 0} (Ничьих: ${t ? t.drawsCount : 0})`;
-
-    const modal = document.createElement('div');
-    modal.id = 'visitor-ttt-result-modal';
-    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(11, 10, 19, 0.88); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 99999; padding: 20px; animation: fadeIn 0.25s ease-out;';
-    
-    modal.innerHTML = `
-      <div style="background: linear-gradient(135deg, #1f1b3c, #141128); border: 2px solid var(--border-light); border-radius: 20px; padding: 24px 20px; max-width: 320px; width: 100%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.6); box-sizing: border-box;">
-        <div style="font-size: 48px; margin-bottom: 8px; animation: bounce 1s infinite;">${icon}</div>
-        <h3 style="color: ${titleColor}; font-size: 16px; font-weight: 800; margin: 0 0 6px 0; line-height: 1.3;">${title}</h3>
-        <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 14px 0; line-height: 1.4;">${subtitle}</p>
-        
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-light); border-radius: 10px; padding: 8px 12px; font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 16px;">
-          ${scoreText}
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-          <button class="btn btn-primary" style="padding: 12px; font-size: 13px; font-weight: 800; width: 100%; margin: 0;" onclick="app.requestLiveTTFRestart()">
-            🔄 Следующий раунд (Реванш) 🎯
-          </button>
-          <button class="btn btn-secondary" style="padding: 10px; font-size: 11px; font-weight: 700; width: 100%; margin: 0;" onclick="app.closeTTFVictoryModal(); app.visitorExitActiveGame();">
-            🚪 Вернуться в Лобби
-          </button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-  }
-
-  closeTTFVictoryModal() {
-    const modal = document.getElementById('visitor-ttt-result-modal');
-    if (modal) {
-      modal.remove();
-    }
-  }
-
-  requestLiveTTFRestart() {
-    this.closeTTFVictoryModal();
-    this.sendNetworkMessage({ type: 'ttt_rematch', gameId: 4 });
-    this.initTTFTournament(true);
-  }
-
-
-  // ==========================================
-  // 🎯 LIVE MULTIPLAYER QUIZ (GAME 1)
-  // ==========================================
-  initLiveQuizGame(totalPlayers) {
-    this.ensureMyPlayerProfile();
-    this.state.activeGameScore = 0;
-    this.state.activeGameQIndex = 0;
-    this.quizHasAnswered = false;
-
-    // Load templates from active branch or state
-    const branch = this.getVisitorConnectedBranch();
-    const branchTemplates = (branch && branch.templates && branch.templates.length > 0) ? branch.templates : this.state.templates;
-    this.liveQuizQuestions = (branchTemplates && branchTemplates.length > 0) ? branchTemplates : [
-      { q: "Какой напиток самый популярный в мире после воды?", options: ["Чай", "Кофе", "Сок", "Лимонад"], correct: 0 },
-      { q: "Из какой страны родом пицца?", options: ["Франция", "Италия", "Испания", "Греция"], correct: 1 },
-      { q: "Какое блюдо является традиционным узбекским?", options: ["Плов", "Борщ", "Суши", "Паста"], correct: 0 },
-      { q: "Сколько градусов в прямом угле?", options: ["45", "90", "180", "360"], correct: 1 }
-    ];
-
-    // Initialize live scores for all real players in queue
-    this.liveQuizScores = {};
-    const inQueue = Object.values(this.queuePlayers || {});
-    inQueue.forEach(p => {
-      this.liveQuizScores[p.id] = {
-        id: p.id,
-        name: p.name || 'Игрок',
-        avatar: p.avatar || '🐼',
-        score: 0
-      };
-    });
-    this.liveQuizScores[this.myPlayerId] = {
-      id: this.myPlayerId,
-      name: this.myPlayerProfile.name,
-      avatar: this.myPlayerProfile.avatar,
-      score: 0
-    };
-
-    const typeLabel = document.getElementById('visitor-game-type-label');
-    if (typeLabel) typeLabel.innerText = "ВИКТОРИНА 🎯";
-
-    this.renderLiveQuizQuestion();
-  }
-
-  renderLiveQuizQuestion() {
-    const qIdx = this.state.activeGameQIndex;
-    const totalQ = this.liveQuizQuestions.length;
-    const qData = this.liveQuizQuestions[qIdx];
-    this.quizHasAnswered = false;
-
-    const qIndexEl = document.getElementById('visitor-game-q-index');
-    if (qIndexEl) qIndexEl.innerText = `Вопрос ${qIdx + 1} из ${totalQ}`;
-
-    const scoreEl = document.getElementById('visitor-game-score');
-    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
-
-    const textLabel = document.getElementById('visitor-game-question-text');
-    if (textLabel) {
-      textLabel.innerHTML = `
-        <div style="text-align:center;">
-          <div style="font-size:14px; font-weight:800; color:#fff; line-height:1.4; margin-bottom:6px;">${qData.q}</div>
-          <div id="quiz-question-timer-badge" style="display:inline-block; font-size:11px; font-weight:800; color:var(--gold); background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:12px; padding:3px 10px;">⏱️ 15 сек</div>
-        </div>
-      `;
-    }
-
-    const optionsBox = document.getElementById('visitor-game-options');
-    if (optionsBox) {
-      optionsBox.innerHTML = '';
-      optionsBox.style.display = 'flex';
-      optionsBox.style.flexDirection = 'column';
-      optionsBox.style.gap = '8px';
-      optionsBox.style.maxWidth = '320px';
-      optionsBox.style.margin = '10px auto';
-
-      const letters = ['A', 'B', 'C', 'D'];
-      qData.options.forEach((opt, optIdx) => {
-        const btn = document.createElement('button');
-        btn.id = `quiz-opt-btn-${optIdx}`;
-        btn.className = 'btn btn-secondary';
-        btn.style.cssText = 'width:100%; padding:12px 14px; font-size:13px; font-weight:700; text-align:left; display:flex; align-items:center; gap:10px; border-radius:10px; border:1px solid var(--border-light); background:#151226; color:#fff; cursor:pointer; outline:none; transition:all 0.15s; margin:0;';
-        btn.innerHTML = `
-          <span style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; background:rgba(139,92,246,0.25); color:var(--primary); font-size:11px; font-weight:900;">${letters[optIdx]}</span>
-          <span style="flex:1;">${opt}</span>
-        `;
-        btn.onclick = () => this.handleLiveQuizAnswer(optIdx, qData.correct);
-        optionsBox.appendChild(btn);
-      });
-    }
-
-    this.renderLiveQuizLeaderboard();
-
-    // Start 15s question countdown timer
-    clearInterval(this.quizQuestionTimer);
-    let timeLeft = 15;
-    this.quizQuestionTimer = setInterval(() => {
-      timeLeft--;
-      const badge = document.getElementById('quiz-question-timer-badge');
-      if (badge) badge.innerText = `⏱️ ${timeLeft} сек`;
-
-      if (timeLeft <= 0) {
-        clearInterval(this.quizQuestionTimer);
-        if (!this.quizHasAnswered) {
-          this.handleLiveQuizAnswer(-1, qData.correct, true);
-        }
-      }
-    }, 1000);
-  }
-
-  handleLiveQuizAnswer(chosenIdx, correctIdx, isTimeout = false) {
-    if (this.quizHasAnswered) return;
-    this.quizHasAnswered = true;
-    clearInterval(this.quizQuestionTimer);
-
-    const isCorrect = (chosenIdx === correctIdx);
-    const chosenBtn = document.getElementById(`quiz-opt-btn-${chosenIdx}`);
-    const correctBtn = document.getElementById(`quiz-opt-btn-${correctIdx}`);
-
-    if (chosenBtn) {
-      if (isCorrect) {
-        chosenBtn.style.background = 'rgba(16, 185, 129, 0.3)';
-        chosenBtn.style.borderColor = '#10b981';
-      } else {
-        chosenBtn.style.background = 'rgba(239, 68, 68, 0.3)';
-        chosenBtn.style.borderColor = '#ef4444';
-      }
-    }
-    if (correctBtn && !isCorrect) {
-      correctBtn.style.background = 'rgba(16, 185, 129, 0.3)';
-      correctBtn.style.borderColor = '#10b981';
-    }
-
-    if (isCorrect) {
-      this.playAudioTone('win');
-      this.state.activeGameScore += 100;
-      const scoreEl = document.getElementById('visitor-game-score');
-      if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
-      this.showVisitorToast("+100 очков! Верно! 🎯", false);
-    } else {
-      this.playAudioTone('click');
-      this.showVisitorToast(isTimeout ? "Время вышло! ⏱️" : "Неверный ответ! ❌", true);
-    }
-
-    // Update local score
-    if (this.liveQuizScores && this.liveQuizScores[this.myPlayerId]) {
-      this.liveQuizScores[this.myPlayerId].score = this.state.activeGameScore;
-    }
-    this.renderLiveQuizLeaderboard();
-
-    // Broadcast score update to other real phones
-    this.sendNetworkMessage({
-      type: 'quiz_score',
-      gameId: 1,
-      playerId: this.myPlayerId,
-      score: this.state.activeGameScore,
-      qIndex: this.state.activeGameQIndex
-    });
-
-    // Advance to next question after 2s
-    setTimeout(() => {
-      this.state.activeGameQIndex++;
-      if (this.state.activeGameQIndex < this.liveQuizQuestions.length) {
-        this.renderLiveQuizQuestion();
-      } else {
-        this.finishLiveQuizGame();
-      }
-    }, 2000);
-  }
-
-  handleRemoteQuizScore(data) {
-    if (!this.liveQuizScores) this.liveQuizScores = {};
-    const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
-    
-    this.liveQuizScores[data.playerId] = {
-      id: data.playerId,
-      name: playerInfo.name || 'Игрок',
-      avatar: playerInfo.avatar || '🐼',
-      score: data.score
-    };
-    this.renderLiveQuizLeaderboard();
-  }
-
-  renderLiveQuizLeaderboard() {
-    const listContainer = document.getElementById('visitor-game-players-list');
-    if (!listContainer) return;
-
-    const scoresArr = Object.values(this.liveQuizScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-
-    listContainer.innerHTML = '';
-    scoresArr.forEach((p, idx) => {
-      const isMe = (p.id === this.myPlayerId);
-      const row = document.createElement('div');
-      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
-      
-      const medals = ['🥇', '🥈', '🥉'];
-      const rankBadge = medals[idx] || `#${idx + 1}`;
-
-      row.innerHTML = `
-        <div style="display:flex; align-items:center; gap:6px;">
-          <span>${rankBadge}</span>
-          <span>${p.avatar || '👤'}</span>
-          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
-        </div>
-        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
-      `;
-      listContainer.appendChild(row);
-    });
-  }
-
-  finishLiveQuizGame() {
-    clearInterval(this.quizQuestionTimer);
-    const scoresArr = Object.values(this.liveQuizScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-
-    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
-    const isWinnerMe = (winner.id === this.myPlayerId);
-
-    this.finishVisitorGame(winner, isWinnerMe);
-  }
-
-  // ==========================================
-  // 📝 LIVE MULTIPLAYER CROSSWORD (GAME 2)
-  // ==========================================
-  initLiveCrosswordGame(totalPlayers) {
-    this.ensureMyPlayerProfile();
-    this.state.activeGameScore = 0;
-
-    const branch = this.getVisitorConnectedBranch();
-    this.liveCrosswordWords = (branch && branch.crosswordWords && branch.crosswordWords.length > 0) ? branch.crosswordWords : [
-      { num: 1, word: "ВИЛКА", clue: "Столовый прибор с острыми зубцами", solved: false, dir: "vertical" },
-      { num: 2, word: "ПИЦЦА", clue: "Итальянская лепешка с сыром и соусом", solved: false, dir: "horizontal" },
-      { num: 3, word: "ЧАЙ", clue: "Горячий ароматный напиток из листьев", solved: false, dir: "horizontal" }
-    ];
-
-    this.liveCrosswordScores = {};
-    const inQueue = Object.values(this.queuePlayers || {});
-    inQueue.forEach(p => {
-      this.liveCrosswordScores[p.id] = { id: p.id, name: p.name, avatar: p.avatar, score: 0 };
-    });
-    this.liveCrosswordScores[this.myPlayerId] = { id: this.myPlayerId, name: this.myPlayerProfile.name, avatar: this.myPlayerProfile.avatar, score: 0 };
-
-    const typeLabel = document.getElementById('visitor-game-type-label');
-    if (typeLabel) typeLabel.innerText = "КРОССВОРД 📝";
-
-    this.renderLiveCrosswordGrid();
-  }
-
-  renderLiveCrosswordGrid() {
-    const textLabel = document.getElementById('visitor-game-question-text');
-    const optionsBox = document.getElementById('visitor-game-options');
-    const scoreEl = document.getElementById('visitor-game-score');
-    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
-
-    const unsolved = this.liveCrosswordWords.filter(w => !w.solved);
-    if (unsolved.length === 0) {
-      this.finishLiveCrosswordGame();
-      return;
-    }
-
-    const currentWord = unsolved[0];
-
-    if (textLabel) {
-      textLabel.innerHTML = `
-        <div style="text-align:center;">
-          <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Слово #${currentWord.num} (${currentWord.word.length} букв)</div>
-          <div style="font-size:13px; font-weight:700; color:#fff; margin-bottom:8px;">💡 ${currentWord.clue}</div>
-        </div>
-      `;
-    }
-
-    if (optionsBox) {
-      optionsBox.innerHTML = '';
-      optionsBox.style.display = 'flex';
-      optionsBox.style.flexDirection = 'column';
-      optionsBox.style.gap = '10px';
-      optionsBox.style.maxWidth = '300px';
-      optionsBox.style.margin = '10px auto';
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = `Введите слово (${currentWord.word.length} букв)...`;
-      input.style.cssText = 'width:100%; padding:12px; font-size:14px; text-transform:uppercase; text-align:center; font-weight:800; letter-spacing:2px; background:#110e1f; border:2px solid var(--border-light); border-radius:12px; color:#fff; outline:none; box-sizing:border-box;';
-      
-      const submitBtn = document.createElement('button');
-      submitBtn.className = 'btn btn-primary';
-      submitBtn.style.cssText = 'width:100%; padding:12px; font-size:13px; font-weight:800; margin:0;';
-      submitBtn.innerText = '✔️ Отгадать слово (+150 очков)';
-      submitBtn.onclick = () => {
-        const val = input.value.trim().toUpperCase();
-        if (val === currentWord.word) {
-          currentWord.solved = true;
-          this.state.activeGameScore += 150;
-          this.playAudioTone('win');
-          this.showVisitorToast(`Слово "${val}" отгадано! 🎉 +150 очков`, false);
-
-          this.sendNetworkMessage({
-            type: 'crossword_solve',
-            gameId: 2,
-            playerId: this.myPlayerId,
-            wordIdx: currentWord.num,
-            score: this.state.activeGameScore
-          });
-
-          this.renderLiveCrosswordGrid();
-        } else {
-          this.playAudioTone('click');
-          this.showVisitorToast("Неверное слово! Попробуйте ещё раз ❌", true);
-          input.value = '';
-          input.focus();
-        }
-      };
-
-      optionsBox.appendChild(input);
-      optionsBox.appendChild(submitBtn);
-    }
-
-    this.renderLiveCrosswordLeaderboard();
-  }
-
-  handleRemoteCrosswordSolve(data) {
-    if (!this.liveCrosswordScores) this.liveCrosswordScores = {};
-    const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
-    
-    this.liveCrosswordScores[data.playerId] = {
-      id: data.playerId,
-      name: playerInfo.name || 'Игрок',
-      avatar: playerInfo.avatar || '🐼',
-      score: data.score
-    };
-
-    const targetWord = (this.liveCrosswordWords || []).find(w => w.num === data.wordIdx);
-    if (targetWord) targetWord.solved = true;
-
-    this.renderLiveCrosswordLeaderboard();
-  }
-
-  renderLiveCrosswordLeaderboard() {
-    const listContainer = document.getElementById('visitor-game-players-list');
-    if (!listContainer) return;
-
-    const scoresArr = Object.values(this.liveCrosswordScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-
-    listContainer.innerHTML = '';
-    scoresArr.forEach((p, idx) => {
-      const isMe = (p.id === this.myPlayerId);
-      const row = document.createElement('div');
-      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
-      row.innerHTML = `
-        <div style="display:flex; align-items:center; gap:6px;">
-          <span>#${idx + 1}</span>
-          <span>${p.avatar || '👤'}</span>
-          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
-        </div>
-        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
-      `;
-      listContainer.appendChild(row);
-    });
-  }
-
-  finishLiveCrosswordGame() {
-    const scoresArr = Object.values(this.liveCrosswordScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
-    this.finishVisitorGame(winner, winner.id === this.myPlayerId);
-  }
-
-  // ==========================================
-  // 🗣️ LIVE MULTIPLAYER ПОЛЕ ЧУДЕС (GAME 3)
-  // ==========================================
-  initLiveGuessWordGame(totalPlayers) {
-    this.ensureMyPlayerProfile();
-    this.state.activeGameScore = 0;
-
-    const branch = this.getVisitorConnectedBranch();
-    const customWord = (branch && branch.guessWordCustomWord) ? branch.guessWordCustomWord.trim().toUpperCase() : (this.state.guessWordCustomWord || '').trim().toUpperCase();
-    const customClue = (branch && branch.guessWordCustomClue) ? branch.guessWordCustomClue.trim() : (this.state.guessWordCustomClue || '').trim();
-
-    if (customWord && customWord.length >= 2) {
-      this.guessWordSecret = customWord;
-      this.guessWordClue = customClue || "Секретное слово заведения!";
-    } else {
-      const presets = [
-        { word: "РЕСТОРАН", clue: "Заведение, где подают изысканные блюда и напитки" },
-        { word: "ОФИЦИАНТ", clue: "Сотрудник, который принимает заказы и обслуживает столики" },
-        { word: "ШЕФПОВАР", clue: "Главный мастер на кухне ресторана" },
-        { word: "КАПУЧИНО", clue: "Популярный кофейный напиток с нежной молочной пенкой" }
-      ];
-      const pick = presets[Math.floor(Math.random() * presets.length)];
-      this.guessWordSecret = pick.word;
-      this.guessWordClue = pick.clue;
-    }
-
-    this.guessWordRevealed = Array(this.guessWordSecret.length).fill(false);
-    this.guessWordGuessedLetters = new Set();
-
-    this.liveGuessWordScores = {};
-    const inQueue = Object.values(this.queuePlayers || {});
-    inQueue.forEach(p => {
-      this.liveGuessWordScores[p.id] = { id: p.id, name: p.name, avatar: p.avatar, score: 0 };
-    });
-    this.liveGuessWordScores[this.myPlayerId] = { id: this.myPlayerId, name: this.myPlayerProfile.name, avatar: this.myPlayerProfile.avatar, score: 0 };
-
-    const typeLabel = document.getElementById('visitor-game-type-label');
-    if (typeLabel) typeLabel.innerText = "ПОЛЕ ЧУДЕС 🗣️";
-
-    this.renderLiveGuessWordGame();
-  }
-
-  renderLiveGuessWordGame() {
-    const textLabel = document.getElementById('visitor-game-question-text');
-    const optionsBox = document.getElementById('visitor-game-options');
-    const scoreEl = document.getElementById('visitor-game-score');
-    if (scoreEl) scoreEl.innerText = `Очки: ${this.state.activeGameScore}`;
-
-    const qIndexEl = document.getElementById('visitor-game-q-index');
-    if (qIndexEl) qIndexEl.innerText = `Слово из ${this.guessWordSecret.length} букв`;
-
-    // Render hidden word boxes
-    let wordBoxesHtml = '<div style="display:flex; justify-content:center; gap:6px; margin:12px 0; flex-wrap:wrap;">';
-    for (let i = 0; i < this.guessWordSecret.length; i++) {
-      const isRevealed = this.guessWordRevealed[i];
-      const letter = isRevealed ? this.guessWordSecret[i] : '';
-      wordBoxesHtml += `
-        <div style="width:34px; height:42px; background:#110e1f; border:2px solid ${isRevealed ? 'var(--primary)' : 'var(--border-light)'}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:900; color:${isRevealed ? '#fff' : 'transparent'}; box-shadow:${isRevealed ? '0 0 10px rgba(139,92,246,0.4)' : 'none'};">
-          ${letter}
-        </div>
-      `;
-    }
-    wordBoxesHtml += '</div>';
-
-    if (textLabel) {
-      textLabel.innerHTML = `
-        <div style="text-align:center;">
-          <div style="font-size:11px; font-weight:700; color:var(--gold); margin-bottom:4px;">💡 Подсказка к слову:</div>
-          <div style="font-size:13px; font-weight:700; color:#fff; line-height:1.4;">${this.guessWordClue}</div>
-          ${wordBoxesHtml}
-        </div>
-      `;
-    }
-
-    // Render Russian Alphabet Keyboard
-    if (optionsBox) {
-      optionsBox.innerHTML = '';
-      optionsBox.style.display = 'grid';
-      optionsBox.style.gridTemplateColumns = 'repeat(8, 1fr)';
-      optionsBox.style.gap = '4px';
-      optionsBox.style.maxWidth = '340px';
-      optionsBox.style.margin = '8px auto';
-
-      const alphabet = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ".split('');
-      alphabet.forEach(letter => {
-        const btn = document.createElement('button');
-        const isUsed = this.guessWordGuessedLetters.has(letter);
-        btn.style.cssText = `height:34px; font-size:12px; font-weight:800; border-radius:6px; border:1px solid var(--border-light); display:flex; align-items:center; justify-content:center; cursor:pointer; outline:none; margin:0; ${isUsed ? 'background:#1f1c30; opacity:0.35; color:#666; cursor:not-allowed;' : 'background:#18142c; color:#fff;'}`;
-        btn.innerText = letter;
-        btn.disabled = isUsed;
-
-        btn.onclick = () => this.handleLiveGuessWordLetter(letter);
-        optionsBox.appendChild(btn);
-      });
-    }
-
-    this.renderLiveGuessWordLeaderboard();
-  }
-
-  handleLiveGuessWordLetter(letter) {
-    if (this.guessWordGuessedLetters.has(letter)) return;
-    this.guessWordGuessedLetters.add(letter);
-
-    let matchCount = 0;
-    for (let i = 0; i < this.guessWordSecret.length; i++) {
-      if (this.guessWordSecret[i] === letter) {
-        this.guessWordRevealed[i] = true;
-        matchCount++;
-      }
-    }
-
-    if (matchCount > 0) {
-      this.playAudioTone('win');
-      const gained = matchCount * 75;
-      this.state.activeGameScore += gained;
-      this.showVisitorToast(`Есть буква "${letter}"! (+${gained} очков) 🎉`, false);
-    } else {
-      this.playAudioTone('click');
-      this.showVisitorToast(`Буквы "${letter}" нет в слове ❌`, true);
-    }
-
-    // Update local score
-    if (this.liveGuessWordScores && this.liveGuessWordScores[this.myPlayerId]) {
-      this.liveGuessWordScores[this.myPlayerId].score = this.state.activeGameScore;
-    }
-
-    // Broadcast letter guess to all other phones
-    this.sendNetworkMessage({
-      type: 'guessword_letter',
-      gameId: 3,
-      playerId: this.myPlayerId,
-      letter: letter,
-      isCorrect: (matchCount > 0),
-      revealed: this.guessWordRevealed,
-      score: this.state.activeGameScore
-    });
-
-    this.renderLiveGuessWordGame();
-
-    // Check if whole word is solved
-    if (this.guessWordRevealed.every(Boolean)) {
-      setTimeout(() => {
-        this.finishLiveGuessWordGame(this.myPlayerId);
-      }, 1000);
-    }
-  }
-
-  handleRemoteGuessWordLetter(data) {
-    if (data.letter) {
-      this.guessWordGuessedLetters.add(data.letter);
-    }
-    if (Array.isArray(data.revealed)) {
-      this.guessWordRevealed = [...data.revealed];
-    }
-    if (this.liveGuessWordScores) {
-      const playerInfo = (this.livePlayers && this.livePlayers[data.playerId]) || (this.queuePlayers && this.queuePlayers[data.playerId]) || { name: 'Игрок', avatar: '🐼' };
-      this.liveGuessWordScores[data.playerId] = {
-        id: data.playerId,
-        name: playerInfo.name || 'Игрок',
-        avatar: playerInfo.avatar || '🐼',
-        score: data.score
-      };
-    }
-
-    this.renderLiveGuessWordGame();
-
-    if (this.guessWordRevealed.every(Boolean)) {
-      setTimeout(() => {
-        this.finishLiveGuessWordGame(data.playerId);
-      }, 1000);
-    }
-  }
-
-  renderLiveGuessWordLeaderboard() {
-    const listContainer = document.getElementById('visitor-game-players-list');
-    if (!listContainer) return;
-
-    const scoresArr = Object.values(this.liveGuessWordScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-
-    listContainer.innerHTML = '';
-    scoresArr.forEach((p, idx) => {
-      const isMe = (p.id === this.myPlayerId);
-      const row = document.createElement('div');
-      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-radius:8px; font-size:11px; margin-bottom:4px; ${isMe ? 'background:rgba(139,92,246,0.25); border:1px solid var(--primary); font-weight:800;' : 'background:rgba(255,255,255,0.03);'}`;
-      row.innerHTML = `
-        <div style="display:flex; align-items:center; gap:6px;">
-          <span>#${idx + 1}</span>
-          <span>${p.avatar || '👤'}</span>
-          <span style="${isMe ? 'color:#fff;' : 'color:var(--text-muted);'}">${p.name}${isMe ? ' (Вы)' : ''}</span>
-        </div>
-        <span style="color:var(--gold); font-weight:800;">${p.score} очков</span>
-      `;
-      listContainer.appendChild(row);
-    });
-  }
-
-  finishLiveGuessWordGame(winnerId) {
-    const scoresArr = Object.values(this.liveGuessWordScores || {});
-    scoresArr.sort((a, b) => b.score - a.score);
-    const winner = scoresArr[0] || { name: 'Вы', avatar: '🏆', score: this.state.activeGameScore, id: this.myPlayerId };
-    this.finishVisitorGame(winner, winner.id === this.myPlayerId);
   }
 
   renderActiveGameQuestion() {
