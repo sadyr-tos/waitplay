@@ -6136,7 +6136,7 @@ class WaitPlayApp {
             joinTime: data.joinTime || Date.now()
           };
           this.updateLiveQueueUI();
-          this.checkInstantQueuePairing(data.gameId);
+          // queue pairing check
         }
       }
     } else if (data.type === 'queue_join') {
@@ -6148,8 +6148,27 @@ class WaitPlayApp {
         joinTime: data.timestamp || Date.now()
       };
       if (this.state.visitorSelectedGameId === data.gameId) {
+        if (data.queueEndTime && (!this.queueEndTime || data.queueEndTime < this.queueEndTime)) {
+          this.queueEndTime = data.queueEndTime;
+          this.sharedQueueEndTime = data.queueEndTime;
+        } else if (this.queueEndTime) {
+          this.sendNetworkMessage({
+            type: 'queue_sync_timer',
+            gameId: data.gameId,
+            queueEndTime: this.queueEndTime,
+            queuePlayers: this.queuePlayers
+          });
+        }
         this.updateLiveQueueUI();
-        this.checkInstantQueuePairing(data.gameId);
+      }
+    } else if (data.type === 'queue_sync_timer') {
+      if (this.state.visitorSelectedGameId === data.gameId && data.queueEndTime) {
+        this.queueEndTime = data.queueEndTime;
+        this.sharedQueueEndTime = data.queueEndTime;
+        if (data.queuePlayers) {
+          this.queuePlayers = { ...this.queuePlayers, ...data.queuePlayers };
+        }
+        this.updateLiveQueueUI();
       }
     } else if (data.type === 'queue_leave') {
       if (this.queuePlayers && this.queuePlayers[data.playerId || data.senderId]) {
@@ -6334,39 +6353,28 @@ class WaitPlayApp {
         this.showVisitorToast("🛠️ В данный момент ведутся технические работы. Игры временно недоступны!", true);
         return;
       }
-
-      const activeOpponentsInGame = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && p.gameId === gameId);
-      if (activeOpponentsInGame.length >= 2 && this.roomStatus && this.roomStatus[gameId] && this.roomStatus[gameId].busy) {
-        this.showVisitorToast("🔒 Комната занята! Идет активный раунд. Подождите окончания.", true);
-        return;
-      }
       
       this.state.visitorSelectedGameId = gameId;
-      this.myQueueJoinTime = Date.now();
       this.saveState();
       
-      this.activeQueues = this.activeQueues || {};
-      const existingQueue = this.activeQueues[gameId];
-      let sharedEndTime = Date.now() + 15000;
-      let isHost = true;
-
-      if (existingQueue && existingQueue.endTime && (existingQueue.endTime - Date.now() > 500)) {
-        sharedEndTime = existingQueue.endTime;
-        isHost = false;
+      // Determine Shared Queue End Time
+      let queueEnd = Date.now() + 15000;
+      if (this.sharedQueueEndTime && (this.sharedQueueEndTime - Date.now() > 1000)) {
+        queueEnd = this.sharedQueueEndTime;
       } else {
-        this.activeQueues[gameId] = { endTime: sharedEndTime, hostId: this.myPlayerId };
+        this.sharedQueueEndTime = queueEnd;
       }
-      this.queueEndTime = sharedEndTime;
+      this.queueEndTime = queueEnd;
 
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
         gameId: gameId,
-        lastSeen: Date.now()
+        joinTime: Date.now()
       };
 
-      const initialRemainingSec = Math.max(1, Math.ceil((this.queueEndTime - Date.now()) / 1000));
+      const initialSec = Math.max(1, Math.ceil((this.queueEndTime - Date.now()) / 1000));
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6377,7 +6385,7 @@ class WaitPlayApp {
             <div class="lobby-radar-pulse"></div>
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${initialRemainingSec} сек</div>
+          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${initialSec} сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
@@ -6386,7 +6394,6 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
-      // Announce entry
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gameId,
@@ -6401,17 +6408,6 @@ class WaitPlayApp {
 
         const timerEl = document.getElementById('lobby-countdown-timer');
         if (timerEl) timerEl.innerText = `${remainingSec} сек`;
-
-        // Broadcast sync heartbeat if I have active queue
-        if (remainingSec > 0 && remainingSec % 2 === 0) {
-          this.sendNetworkMessage({
-            type: 'queue_tick',
-            gameId: gameId,
-            remainingSec: remainingSec,
-            queueEndTime: this.queueEndTime,
-            queuePlayers: this.queuePlayers
-          });
-        }
 
         if (remainingMs <= 0) {
           clearInterval(this.state.lobbyCountdown);
@@ -6452,6 +6448,7 @@ class WaitPlayApp {
       const exitingGameId = this.state.visitorSelectedGameId;
       this.state.visitorSelectedGameId = null;
       this.queueEndTime = null;
+      this.sharedQueueEndTime = null;
       this.queuePlayers = {};
 
       const overlay = document.getElementById('lobby-queue-overlay');
@@ -6494,6 +6491,8 @@ class WaitPlayApp {
       const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && p.gameId === gameId);
       const totalLiveInQueue = inQueue.length;
 
+      this.sharedQueueEndTime = null;
+
       if (totalLiveInQueue < 2) {
         if (overlay) {
           overlay.innerHTML = `
@@ -6505,13 +6504,6 @@ class WaitPlayApp {
         }
         return;
       }
-
-      // Broadcast start signal to make sure all phones enter game at the exact same millisecond
-      this.sendNetworkMessage({
-        type: 'queue_start_match',
-        gameId: gameId,
-        queuePlayers: this.queuePlayers
-      });
 
       if (overlay) {
         overlay.style.display = 'none';
