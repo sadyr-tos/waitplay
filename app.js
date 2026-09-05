@@ -6130,9 +6130,9 @@ class WaitPlayApp {
     const now = Date.now();
     let changed = false;
     
-    // Purge dead corridor presence
+    // Purge dead corridor presence (relaxed to 15000ms to avoid aggressive drops on mobile)
     for (const [id, player] of Object.entries(this.livePlayers || {})) {
-      if (id !== this.myPlayerId && now - (player.lastSeen || 0) > 3500) {
+      if (id !== this.myPlayerId && now - (player.lastSeen || 0) > 15000) {
         delete this.livePlayers[id];
         if (this.queuePlayers && this.queuePlayers[id]) {
           delete this.queuePlayers[id];
@@ -6144,8 +6144,7 @@ class WaitPlayApp {
     // Purge dead queue entries
     for (const [id, qp] of Object.entries(this.queuePlayers || {})) {
       if (id !== this.myPlayerId) {
-        const lp = this.livePlayers && this.livePlayers[id];
-        if (!lp || now - (lp.lastSeen || 0) > 3500) {
+        if (now - (qp.lastSeen || 0) > 15000) {
           delete this.queuePlayers[id];
           changed = true;
         }
@@ -6286,20 +6285,20 @@ class WaitPlayApp {
       this.myQueueJoinTime = Date.now();
       this.saveState();
       
-      // Determine Shared Queue End Time: Join existing 15s window or start new 15s window
       this.activeQueues = this.activeQueues || {};
       const existingQueue = this.activeQueues[gameId];
       let sharedEndTime = Date.now() + 15000;
+      let isHost = true;
 
-      if (existingQueue && existingQueue.endTime && (existingQueue.endTime - Date.now() > 1000)) {
+      if (existingQueue && existingQueue.endTime && (existingQueue.endTime - Date.now() > 500)) {
         sharedEndTime = existingQueue.endTime;
+        isHost = false;
       } else {
         this.activeQueues[gameId] = { endTime: sharedEndTime, hostId: this.myPlayerId };
       }
       this.queueEndTime = sharedEndTime;
 
-      // Wipe stale queue and add myself
-      this.queuePlayers = {};
+      this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
@@ -6319,7 +6318,7 @@ class WaitPlayApp {
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
           <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${initialRemainingSec} сек</div>
-          <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: 1 чел.</div>
+          <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
       }
@@ -6327,7 +6326,7 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
-      // Announce queue entry along with shared queue timer
+      // Announce entry
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gameId,
@@ -6335,22 +6334,30 @@ class WaitPlayApp {
         queueEndTime: this.queueEndTime
       });
 
-      // Synchronized timer tick (checked every 250ms for razor-sharp accuracy)
       clearInterval(this.state.lobbyCountdown);
-      const tick = () => {
+      this.state.lobbyCountdown = setInterval(() => {
         const remainingMs = this.queueEndTime - Date.now();
         const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-        
+
         const timerEl = document.getElementById('lobby-countdown-timer');
         if (timerEl) timerEl.innerText = `${remainingSec} сек`;
+
+        // Broadcast sync heartbeat if I have active queue
+        if (remainingSec > 0 && remainingSec % 2 === 0) {
+          this.sendNetworkMessage({
+            type: 'queue_tick',
+            gameId: gameId,
+            remainingSec: remainingSec,
+            queueEndTime: this.queueEndTime,
+            queuePlayers: this.queuePlayers
+          });
+        }
 
         if (remainingMs <= 0) {
           clearInterval(this.state.lobbyCountdown);
           this.finishQueueMatchmaking(gameId);
         }
-      };
-      tick();
-      this.state.lobbyCountdown = setInterval(tick, 250);
+      }, 500);
     } catch(e) {
       console.error("Error in visitorJoinLobby:", e);
     }
@@ -6438,6 +6445,13 @@ class WaitPlayApp {
         }
         return;
       }
+
+      // Broadcast start signal to make sure all phones enter game at the exact same millisecond
+      this.sendNetworkMessage({
+        type: 'queue_start_match',
+        gameId: gameId,
+        queuePlayers: this.queuePlayers
+      });
 
       if (overlay) {
         overlay.style.display = 'none';
@@ -9053,7 +9067,7 @@ initTTFTournament(isNextRound = false) {
               
               if (p.id === 'user') {
                 this.playAudioTone('error');
-                this.showVisitorToast("💥 Врезались в барьер!", true);
+                // obstacle collision
               }
 
               // Check for elimination
@@ -9064,7 +9078,7 @@ initTTFTournament(isNextRound = false) {
                 
                 if (p.id === 'user') {
                   this.playAudioTone('error');
-                  this.showVisitorToast("💀 Вы выбыли из гонки!", true);
+                  // race eliminated
                   
                   // End game immediately with lead bot as winner
                   const leadBot = this.state.racePlayers.slice(1).filter(bp => !bp.eliminated).sort((a, b) => b.progress - a.progress)[0];
@@ -11525,6 +11539,12 @@ initTTFTournament(isNextRound = false) {
 
   showGameRules(gameId, event) {
     if (event) {
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+    }
+
+    const gId = parseInt(gameId, 10);
+    if (event) {
       event.stopPropagation();
       event.preventDefault();
     }
@@ -11582,7 +11602,7 @@ initTTFTournament(isNextRound = false) {
       }
     };
 
-    const gRule = rules[gameId] || {
+    const gRule = rules[gId] || rules[gameId] || {
       title: "Правила игры",
       icon: "📋",
       text: "Правила и цели игры: играйте честно, соблюдайте правила заведения и получайте призы за победу!"
