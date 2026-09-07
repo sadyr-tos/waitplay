@@ -6133,16 +6133,15 @@ class WaitPlayApp {
         };
         this.updateLivePlayersCorridorUI();
 
-        if (data.inQueue && data.gameId === this.state.visitorSelectedGameId) {
+        if (data.inQueue && Number(data.gameId) === Number(this.state.visitorSelectedGameId)) {
           this.queuePlayers = this.queuePlayers || {};
           this.queuePlayers[data.senderId] = {
             ...data.profile,
             id: data.senderId,
-            gameId: data.gameId,
+            gameId: Number(data.gameId),
             joinTime: data.joinTime || Date.now()
           };
           this.updateLiveQueueUI();
-          // queue pairing check
         }
       }
     } else if (data.type === 'queue_join') {
@@ -6160,49 +6159,27 @@ class WaitPlayApp {
       if (myGId === targetGId) {
         this.updateLiveQueueUI();
 
-        // If I am host, reply immediately with current tick
-        if (this.isQueueHost && typeof this.queueRemainingSec === 'number') {
-          this.sendNetworkMessage({
-            type: 'queue_tick',
-            gameId: targetGId,
-            hostId: this.myPlayerId,
-            remainingSec: this.queueRemainingSec,
-            queuePlayers: this.queuePlayers
-          });
-        }
+        // Bi-directional handshake: reply with queue_presence
+        this.sendNetworkMessage({
+          type: 'queue_presence',
+          gameId: targetGId,
+          profile: this.myPlayerProfile
+        });
       }
-    } else if (data.type === 'queue_tick') {
+    } else if (data.type === 'queue_presence') {
       const targetGId = Number(data.gameId);
       const myGId = Number(this.state.visitorSelectedGameId);
 
-      if (myGId === targetGId) {
-        if (!this.isQueueHost) {
-          this.queueRemainingSec = data.remainingSec;
-          const timerEl = document.getElementById('lobby-countdown-timer');
-          if (timerEl) timerEl.innerText = `${data.remainingSec} сек`;
-        }
-
-        if (data.queuePlayers && typeof data.queuePlayers === 'object') {
-          this.queuePlayers = { ...this.queuePlayers, ...data.queuePlayers };
-          this.updateLiveQueueUI();
-        }
-      }
-    } else if (data.type === 'queue_match_start') {
-      const targetGId = Number(data.gameId);
-      const myGId = Number(this.state.visitorSelectedGameId);
+      this.queuePlayers = this.queuePlayers || {};
+      this.queuePlayers[data.senderId] = {
+        ...(data.profile || {}),
+        id: data.senderId,
+        gameId: targetGId,
+        joinTime: data.timestamp || Date.now()
+      };
 
       if (myGId === targetGId) {
-        clearInterval(this.state.lobbyCountdown);
-        if (data.queuePlayers) {
-          this.queuePlayers = { ...this.queuePlayers, ...data.queuePlayers };
-        }
-        const overlay = document.getElementById('lobby-queue-overlay');
-        if (overlay) {
-          overlay.style.display = 'none';
-          overlay.innerHTML = '';
-        }
-        const total = Object.keys(this.queuePlayers || {}).length;
-        this.startActiveGame(total >= 2 ? total : 2);
+        this.updateLiveQueueUI();
       }
     } else if (data.type === 'queue_leave') {
       const targetGId = Number(data.gameId);
@@ -6227,22 +6204,46 @@ class WaitPlayApp {
         busy: data.busy,
         players: data.players
       };
+    } else if (data.type === 'request_branch_config') {
+      if (this.state.activeBranchId === data.branchId) {
+        this.broadcastBranchConfig();
+      }
+    } else if (data.type === 'branch_config_sync') {
+      if (data.config && data.branchId === this.state.visitorConnectedBranchId) {
+        this.visitorBranchConfig = data.config;
+        try {
+          localStorage.setItem('cached_branch_config_' + data.branchId, JSON.stringify(data.config));
+        } catch(e) {}
+        this.renderVisitorLobbyGames();
+      }
+    } else if (data.type === 'quiz_score') {
+      if (this.state.visitorSelectedGameId === 1) {
+        this.handleRemoteQuizScore(data);
+      }
+    } else if (data.type === 'crossword_solve') {
+      if (this.state.visitorSelectedGameId === 2) {
+        this.handleRemoteCrosswordSolve(data);
+      }
+    } else if (data.type === 'guessword_letter') {
+      if (this.state.visitorSelectedGameId === 3) {
+        this.handleRemoteGuessWordLetter(data);
+      }
     } else if (data.type === 'ttt_join') {
       this.handleRemoteTTFJoin(data);
     } else if (data.type === 'ttt_paired') {
       this.handleRemoteTTFPaired(data);
     } else if (data.type === 'ttt_move' || data.type === 'game_move') {
-      if (data.gameId === 4) {
+      if (Number(data.gameId) === 4) {
         this.handleRemoteTTFMove(data);
       }
     } else if (data.type === 'ttt_rematch' || data.type === 'game_restart') {
-      if (data.gameId === 4) {
+      if (Number(data.gameId) === 4) {
         this.handleRemoteTTFRestart(data);
       }
     }
   }
 
-    cleanStaleNetworkPlayers() {
+  cleanStaleNetworkPlayers() {
     const now = Date.now();
     let changed = false;
     
@@ -6383,9 +6384,7 @@ class WaitPlayApp {
       const gId = Number(gameId);
       this.ensureMyPlayerProfile();
       
-      if (!this.mqttClient || !this.mqttClient.connected) {
-        this.initRealtimeNetwork(this.state.visitorConnectedBranchId);
-      }
+      this.initRealtimeNetwork(this.state.visitorConnectedBranchId);
 
       if (this.state.manualTestingMode) {
         this.showVisitorToast("🛠️ В данный момент ведутся технические работы. Игры временно недоступны!", true);
@@ -6395,9 +6394,6 @@ class WaitPlayApp {
       this.state.visitorSelectedGameId = gId;
       this.saveState();
 
-      // Check if existing queue players already exist in corridor
-      const activeInGame = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && Number(p.gameId) === gId && p.inQueue);
-      
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
@@ -6405,16 +6401,6 @@ class WaitPlayApp {
         gameId: gId,
         joinTime: Date.now()
       };
-
-      if (activeInGame.length > 0) {
-        // Guest mode: join existing host
-        this.isQueueHost = false;
-        this.queueRemainingSec = 14;
-      } else {
-        // Host mode: start master countdown
-        this.isQueueHost = true;
-        this.queueRemainingSec = 15;
-      }
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6425,7 +6411,7 @@ class WaitPlayApp {
             <div class="lobby-radar-pulse"></div>
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${this.queueRemainingSec} сек</div>
+          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">15 сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
@@ -6438,32 +6424,30 @@ class WaitPlayApp {
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gId,
-        profile: this.myPlayerProfile,
-        isHost: this.isQueueHost,
-        remainingSec: this.queueRemainingSec
+        profile: this.myPlayerProfile
       });
 
-      // Master Countdown Interval
+      // Simple, robust 15-second countdown
       clearInterval(this.state.lobbyCountdown);
+      let remainingSec = 15;
+
       this.state.lobbyCountdown = setInterval(() => {
-        this.queueRemainingSec--;
-        if (this.queueRemainingSec < 0) this.queueRemainingSec = 0;
+        remainingSec--;
+        if (remainingSec < 0) remainingSec = 0;
 
         const timerEl = document.getElementById('lobby-countdown-timer');
-        if (timerEl) timerEl.innerText = `${this.queueRemainingSec} сек`;
+        if (timerEl) timerEl.innerText = `${remainingSec} сек`;
 
-        // If host, broadcast tick to sync all joining phones
-        if (this.isQueueHost) {
+        // Keep broadcasting presence every 2 seconds
+        if (remainingSec % 2 === 0) {
           this.sendNetworkMessage({
-            type: 'queue_tick',
+            type: 'queue_join',
             gameId: gId,
-            hostId: this.myPlayerId,
-            remainingSec: this.queueRemainingSec,
-            queuePlayers: this.queuePlayers
+            profile: this.myPlayerProfile
           });
         }
 
-        if (this.queueRemainingSec <= 0) {
+        if (remainingSec <= 0) {
           clearInterval(this.state.lobbyCountdown);
           this.finishQueueMatchmaking(gId);
         }
@@ -6501,8 +6485,6 @@ class WaitPlayApp {
       clearInterval(this.state.lobbyCountdown);
       const exitingGameId = Number(this.state.visitorSelectedGameId);
       this.state.visitorSelectedGameId = null;
-      this.isQueueHost = false;
-      this.queueRemainingSec = null;
       this.queuePlayers = {};
 
       const overlay = document.getElementById('lobby-queue-overlay');
@@ -6558,15 +6540,6 @@ class WaitPlayApp {
           `;
         }
         return;
-      }
-
-      // If host, announce synchronized match start
-      if (this.isQueueHost) {
-        this.sendNetworkMessage({
-          type: 'queue_match_start',
-          gameId: gId,
-          queuePlayers: this.queuePlayers
-        });
       }
 
       if (overlay) {
@@ -10888,16 +10861,11 @@ class WaitPlayApp {
     }
 
     const gId = parseInt(gameId, 10);
-    if (event) {
-      event.stopPropagation();
-      event.preventDefault();
-    }
-
     const rules = {
       1: {
         title: "Викторина 🎯",
         icon: "🎯",
-        text: "<b>Цель игры:</b> Отвечайте на интересные вопросы быстрее всех и набирайте максимум очков!<br><br>• <b>Количество участников:</b> от 2 до 15 человек.<br>• <b>Начисление очков:</b> за каждый правильный ответ начисляются баллы. Чем быстрее ответ, тем выше место в таблице лидеров!<br>• <b>Победа:</b> побеждает участник с наибольшим количеством очков в конце раунда."
+        text: "<b>Цель игры:</b> Отвечайте на интересные вопросы быстрее всех и набирайте максимум очков!<br><br>• <b>Количество участников:</b> от 2 до 15 человек.<br>• <b>Начисление очков:</b> за каждый правильный ответ начисляются баллы.<br>• <b>Победа:</b> побеждает участник с наибольшим количеством очков в конце раунда."
       },
       2: {
         title: "Кроссворд 📝",
@@ -10907,52 +10875,36 @@ class WaitPlayApp {
       3: {
         title: "Поле Чудес 🗣️",
         icon: "🗣️",
-        text: "<b>Цель игры:</b> Вращайте барабан, открывайте буквы и назовите зашифрованное слово целиком!<br><br>• <b>Участники:</b> от 2 до 5 человек.<br>• <b>Секторы:</b> на барабане есть очки, призы и сектор «Банкрот».<br>• <b>Победа:</b> побеждает тот, кто первым отгадает главное слово!"
+        text: "<b>Цель игры:</b> Открывайте буквы и назовите зашифрованное слово целиком!<br><br>• <b>Участники:</b> от 2 до 5 человек.<br>• <b>Победа:</b> побеждает тот, кто первым отгадает главное слово!"
       },
       4: {
         title: "Крестики-нолики ❌⭕",
         icon: "❌⭕",
-        text: "<b>Цель игры:</b> Соберите линию из трёх своих символов (по горизонтали, вертикали или диагонали) раньше соперника!<br><br>• <b>Формат:</b> Турнир или дуэль 1 на 1.<br>• <b>Автоматический подбор:</b> если набралось 2 игрока — начинается дуэль. Если 4 или 8 игроков — запускается турнирная сетка (полуфиналы и финал)!<br>• <b>Смена сторон:</b> при каждом реванше право первого хода (Крестик ❌) переходит ко второму игроку!"
+        text: "<b>Цель игры:</b> Соберите линию из трёх своих символов (по горизонтали, вертикали или диагонали) раньше соперника!<br><br>• <b>Формат:</b> Турнир или дуэль 1 на 1.<br>• <b>Смена сторон:</b> при каждом реванше право первого хода (Крестик ❌) переходит ко второму игроку!"
       },
-      5: {
-        title: "Мемори 🧠",
-        icon: "🧠",
-        text: "<b>Цель игры:</b> Тренируйте память! Открывайте парные карточки на скорость.<br><br>• <b>Участники:</b> от 2 до 4 человек.<br>• <b>Ход:</b> открывайте по 2 карточки. Если картинки совпали — они остаются открытыми, а вы получаете очки!<br>• <b>Победа:</b> побеждает набравший наибольшее число пар."
-      },
-      6: {
-        title: "Найди отличия 🔍",
-        icon: "🔍",
-        text: "<b>Цель игры:</b> Найдите единственный отличающийся смайлик на скорость быстрее соперников!<br><br>• <b>Участники:</b> от 2 до 10 человек.<br>• <b>Раунды:</b> серия быстрых раундов на внимательность.<br>• <b>Победа:</b> самый внимательный и быстрый игрок забирает кубок!"
-      },
-      7: {
-        title: "Нарезка 🔪",
-        icon: "🔪",
-        text: "<b>Цель игры:</b> Нарезайте летающие ингредиенты и избегайте препятствий!<br><br>• <b>Участники:</b> от 2 до 8 человек.<br>• <b>Очки:</b> за каждый нарезанный фрукт начисляются комбо-очки.<br>• <b>Победа:</b> игрок с самым высоким комбо побеждает."
-      },
-      8: {
-        title: "Торт до Небес 🎂",
-        icon: "🎂",
-        text: "<b>Цель игры:</b> Складывайте коржи торта точно друг на друга и постройте самый высокий небоскрёб из торта!<br><br>• <b>Участники:</b> от 2 до 8 человек.<br>• <b>Точность:</b> неровно положенные части коржа срезаются.<br>• <b>Победа:</b> побеждает построивший самый высокий торт!"
-      },
-      9: {
-        title: "Шашки 🏁",
-        icon: "🏁",
-        text: "<b>Цель игры:</b> Классическая дуэль в русские шашки 1 на 1.<br><br>• <b>Правила:</b> ход по диагонали вперёд, взятие назад разрешено, дамка ходит на любое число клеток.<br>• <b>Победа:</b> срубите все шашки соперника или заблокируйте его ходы!"
-      },
-      10: {
-        title: "Шахматы ♟️",
-        icon: "♟️",
-        text: "<b>Цель игры:</b> Классические шахматы 1 на 1.<br><br>• <b>Правила:</b> международные правила ФИДЕ, таймер на ход.<br>• <b>Победа:</b> поставьте мат королю соперника или выиграйте по времени!"
-      }
+      5: { title: "Мемори 🧠", icon: "🧠", text: "Открывайте парные карточки на скорость!" },
+      6: { title: "Найди отличия 🔍", icon: "🔍", text: "Найдите единственный отличающийся смайлик!" },
+      7: { title: "Нарезка 🔪", icon: "🔪", text: "Нарезайте летающие фрукты!" },
+      8: { title: "Торт до Небес 🎂", icon: "🎂", text: "Постройте самый высокий торт!" },
+      9: { title: "Шашки 🏁", icon: "🏁", text: "Классические русские шашки 1 на 1!" },
+      10: { title: "Шахматы ♟️", icon: "♟️", text: "Классические шахматы 1 на 1!" }
     };
 
     const gRule = rules[gId] || rules[gameId] || {
       title: "Правила игры",
       icon: "📋",
-      text: "Правила и цели игры: играйте честно, соблюдайте правила заведения и получайте призы за победу!"
+      text: "Играйте честно, соблюдайте правила заведения и получайте призы за победу!"
     };
 
-    const modal = document.getElementById('visitor-rules-modal');
+    let modal = document.getElementById('visitor-rules-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'visitor-rules-modal';
+      modal.className = 'modal-overlay';
+      modal.innerHTML = '<div class="modal-content" style="text-align: center; max-width: 300px; background: #18142c; border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); position: relative;"><div style="font-size: 36px; margin-bottom: 8px;" id="visitor-rules-icon">📋</div><h3 style="font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--gold);" id="visitor-rules-title">Правила игры</h3><div style="font-size: 11px; color: var(--text-main); line-height: 1.5; margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);" id="visitor-rules-content">Описание правил...</div><button class="btn btn-primary" style="padding: 8px 16px; font-size: 12px; width: 100%; border-radius: 8px; margin: 0; cursor: pointer;" onclick="app.closeVisitorRulesModal()">Понятно 👍</button></div>';
+      document.body.appendChild(modal);
+    }
+
     const iconEl = document.getElementById('visitor-rules-icon');
     const titleEl = document.getElementById('visitor-rules-title');
     const contentEl = document.getElementById('visitor-rules-content');
@@ -10961,10 +10913,9 @@ class WaitPlayApp {
     if (titleEl) titleEl.innerText = gRule.title;
     if (contentEl) contentEl.innerHTML = gRule.text;
 
-    if (modal) {
-      modal.classList.add('active');
-      modal.style.display = 'flex';
-    }
+    modal.classList.add('active');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '999999';
   }
 
   closeVisitorRulesModal() {
