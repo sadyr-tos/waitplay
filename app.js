@@ -6596,24 +6596,345 @@ class WaitPlayApp {
       this.initTTFTournament();
       return;
     }
+  }
 
-    if (gameId === 1) {
-      this.initLiveQuizGame(totalPlayers);
-      return;
+  initTTFTournament(isNextRound = false) {
+    this.ensureMyPlayerProfile();
+
+    let currentRound = (this.state.tttTournament && this.state.tttTournament.round) ? (this.state.tttTournament.round + 1) : 1;
+    if (!isNextRound) currentRound = 1;
+
+    let scoreX = (this.state.tttTournament && this.state.tttTournament.scoreX) || 0;
+    let scoreO = (this.state.tttTournament && this.state.tttTournament.scoreO) || 0;
+    let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
+    if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
+
+    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+
+    let isHost = true;
+    let mySymbol = 'X';
+    let oppSymbol = 'O';
+    let myName = `${this.myPlayerProfile.avatar} ${this.myPlayerProfile.name}`;
+    let oppName = '⏳ Ожидание игрока 2...';
+    let status = 'waiting';
+
+    if (otherPlayers.length > 0) {
+      const other = otherPlayers[0];
+      // Deterministic host election based on ID comparison
+      if (this.myPlayerId > other.id) {
+        isHost = false;
+        mySymbol = 'O';
+        oppSymbol = 'X';
+        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 1'}`;
+        status = 'playing';
+      } else {
+        isHost = true;
+        mySymbol = 'X';
+        oppSymbol = 'O';
+        oppName = `${other.avatar || '👤'} ${other.name || 'Игрок 2'}`;
+        status = 'playing';
+      }
+
+      this.sendNetworkMessage({
+        type: 'ttt_paired',
+        gameId: 4,
+        hostId: (isHost ? this.myPlayerId : other.id),
+        hostProfile: (isHost ? this.myPlayerProfile : other),
+        guestId: (isHost ? other.id : this.myPlayerId),
+        guestProfile: (isHost ? other : this.myPlayerProfile),
+        round: currentRound
+      });
+    } else {
+      this.sendNetworkMessage({
+        type: 'ttt_join',
+        gameId: 4,
+        profile: this.myPlayerProfile
+      });
     }
 
-    if (gameId === 2) {
-      this.initLiveCrosswordGame(totalPlayers);
-      return;
-    }
+    this.state.tttTournament = {
+      round: currentRound,
+      scoreX: scoreX,
+      scoreO: scoreO,
+      drawsCount: drawsCount,
+      isHost: isHost,
+      mySymbol: mySymbol,
+      oppSymbol: oppSymbol,
+      myName: myName,
+      oppName: oppName,
+      board: Array(9).fill(null),
+      status: status,
+      winner: null
+    };
 
-    if (gameId === 3) {
-      this.initLiveGuessWordGame(totalPlayers);
-      return;
-    }
+    const scoreEl = document.getElementById('visitor-game-score');
+    if (scoreEl) scoreEl.innerText = `Раунд: ${currentRound}`;
 
-    // Default fallback
     this.renderActiveGameQuestion();
+  }
+
+  handleRemoteTTFJoin(data) {
+    const t = this.state.tttTournament;
+    if (!t) return;
+
+    const guest = data.profile || { name: 'Игрок 2', avatar: '🐺', id: data.senderId };
+    t.oppName = `${guest.avatar} ${guest.name}`;
+    t.status = 'playing';
+
+    this.sendNetworkMessage({
+      type: 'ttt_paired',
+      gameId: 4,
+      hostId: this.myPlayerId,
+      hostProfile: this.myPlayerProfile,
+      guestId: data.senderId,
+      guestProfile: guest,
+      round: t.round
+    });
+
+    this.renderActiveGameQuestion();
+  }
+
+  handleRemoteTTFPaired(data) {
+    const t = this.state.tttTournament;
+    if (!t) return;
+
+    if (this.myPlayerId === data.hostId) {
+      t.isHost = true;
+      t.mySymbol = 'X';
+      t.oppSymbol = 'O';
+      t.myName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
+      t.oppName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
+      t.status = 'playing';
+    } else if (this.myPlayerId === data.guestId) {
+      t.isHost = false;
+      t.mySymbol = 'O';
+      t.oppSymbol = 'X';
+      t.myName = `${data.guestProfile.avatar} ${data.guestProfile.name}`;
+      t.oppName = `${data.hostProfile.avatar} ${data.hostProfile.name}`;
+      t.status = 'playing';
+    }
+
+    this.renderActiveGameQuestion();
+  }
+
+  renderTTFBoard(optionsBox, textLabel) {
+    const t = this.state.tttTournament;
+    if (!t) {
+      this.initTTFTournament();
+      return;
+    }
+
+    // Determine whose turn it is mathematically by counting symbols on board
+    let countX = 0, countO = 0;
+    t.board.forEach(cell => {
+      if (cell === 'X') countX++;
+      if (cell === 'O') countO++;
+    });
+
+    const activeSymbol = (countX === countO) ? 'X' : 'O';
+    const isWaiting = (t.status === 'waiting');
+    const isMyTurn = (!isWaiting && !t.winner && activeSymbol === t.mySymbol);
+
+    let turnIndicator = '';
+    if (isWaiting) {
+      turnIndicator = `<span style="color:var(--gold); font-weight:800; font-size:13px;">⏳ Ожидание второго живого игрока...</span>`;
+    } else if (t.winner) {
+      turnIndicator = '';
+    } else if (isMyTurn) {
+      turnIndicator = `<span style="color:var(--success); font-weight:800; font-size:14px;">👉 Ваш ход (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'})</span>`;
+    } else {
+      turnIndicator = `<span style="color:var(--gold); font-weight:700; font-size:13px;">⏳ Ход соперника (${t.oppName})...</span>`;
+    }
+
+    const scoreLine = `🏆 Счёт: ❌ ${t.scoreX} — ⭕ ${t.scoreO} (Ничьих: ${t.drawsCount})`;
+
+    if (textLabel) {
+      textLabel.innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:13px; font-weight:800; color:var(--gold); margin-bottom:3px;">🎮 КРЕСТИКИ-НОЛИКИ (РАУНД ${t.round})</div>
+          <div style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:13px; color:#fff; margin-bottom:4px;">
+            <span style="${t.mySymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.myName} (${t.mySymbol === 'X' ? '❌' : '⭕'})</span>
+            <span style="color:var(--gold); font-size:11px;">VS</span>
+            <span style="${t.oppSymbol === 'X' ? 'color:var(--primary); font-weight:800;' : ''}">${t.oppName} (${t.oppSymbol === 'X' ? '❌' : '⭕'})</span>
+          </div>
+          <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">${scoreLine}</div>
+          <div style="min-height:22px;">${turnIndicator}</div>
+        </div>
+      `;
+    }
+
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.style.display = 'grid';
+      optionsBox.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      optionsBox.style.gap = '8px';
+      optionsBox.style.maxWidth = '280px';
+      optionsBox.style.margin = '12px auto 0 auto';
+
+      for (let i = 0; i < 9; i++) {
+        const cell = t.board[i];
+        const btn = document.createElement('button');
+        btn.style.cssText = 'height: 75px; font-size: 32px; font-weight: 900; background: #18142c; border: 2px solid var(--border-light); border-radius: 12px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: all 0.15s; margin: 0;';
+        
+        if (cell === 'X') {
+          btn.innerText = '❌';
+          btn.style.borderColor = 'var(--primary)';
+          btn.style.background = 'rgba(139, 92, 246, 0.15)';
+          btn.disabled = true;
+        } else if (cell === 'O') {
+          btn.innerText = '⭕';
+          btn.style.borderColor = 'var(--gold)';
+          btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          btn.disabled = true;
+        } else {
+          btn.innerText = '';
+          if (isMyTurn) {
+            btn.onclick = () => this.handleLiveTTFCellClick(i);
+            btn.style.borderColor = 'rgba(139, 92, 246, 0.5)';
+          } else {
+            btn.style.cursor = 'not-allowed';
+            btn.style.opacity = '0.6';
+            btn.disabled = true;
+          }
+        }
+        optionsBox.appendChild(btn);
+      }
+    }
+  }
+
+  handleLiveTTFCellClick(index) {
+    const t = this.state.tttTournament;
+    if (!t || t.board[index] !== null || t.winner || t.status !== 'playing') return;
+
+    let countX = 0, countO = 0;
+    t.board.forEach(cell => {
+      if (cell === 'X') countX++;
+      if (cell === 'O') countO++;
+    });
+    const activeSymbol = (countX === countO) ? 'X' : 'O';
+    if (activeSymbol !== t.mySymbol) return;
+
+    t.board[index] = t.mySymbol;
+    this.playAudioTone('click');
+
+    this.sendNetworkMessage({
+      type: 'ttt_move',
+      gameId: 4,
+      cellIndex: index,
+      symbol: t.mySymbol,
+      board: t.board
+    });
+
+    const winner = this.checkTTFWinner(t.board);
+    if (winner) {
+      t.winner = winner;
+      if (winner === 'X') t.scoreX++;
+      if (winner === 'O') t.scoreO++;
+      this.finishTTFMatch(winner);
+    } else if (t.board.every(cell => cell !== null)) {
+      t.winner = 'draw';
+      t.drawsCount++;
+      this.finishTTFMatch('draw');
+    } else {
+      this.renderActiveGameQuestion();
+    }
+  }
+
+  handleRemoteTTFMove(data) {
+    const t = this.state.tttTournament;
+    if (!t || data.gameId !== 4) return;
+
+    if (Array.isArray(data.board)) {
+      t.board = [...data.board];
+    } else {
+      t.board[data.cellIndex] = data.symbol;
+    }
+    this.playAudioTone('click');
+
+    const winner = this.checkTTFWinner(t.board);
+    if (winner) {
+      t.winner = winner;
+      if (winner === 'X') t.scoreX++;
+      if (winner === 'O') t.scoreO++;
+      this.finishTTFMatch(winner);
+    } else if (t.board.every(cell => cell !== null)) {
+      t.winner = 'draw';
+      t.drawsCount++;
+      this.finishTTFMatch('draw');
+    } else {
+      this.renderActiveGameQuestion();
+    }
+  }
+
+  handleRemoteTTFRestart(data) {
+    if (data.gameId === 4) {
+      this.initTTFTournament(true);
+    }
+  }
+
+  checkTTFWinner(board) {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+    for (const [a, b, c] of lines) {
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return board[a];
+      }
+    }
+    return null;
+  }
+
+  finishTTFMatch(result) {
+    const textLabel = document.getElementById('visitor-game-question-text');
+    const optionsBox = document.getElementById('visitor-game-options-container');
+    const t = this.state.tttTournament;
+
+    let resultHtml = '';
+    if (result === 'draw') {
+      this.showVisitorToast("🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:#fff; margin-bottom:6px;">🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
+        </div>
+      `;
+    } else if (t && result === t.mySymbol) {
+      this.showVisitorToast("🎉 ВЫ ВЫИГРАЛИ ЭТОТ РАУНД!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:var(--success); margin-bottom:6px;">🎉 ВЫ ВЫИГРАЛИ РАУНД! 🏆</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t.scoreX} — ⭕ ${t.scoreO}</div>
+        </div>
+      `;
+    } else {
+      this.showVisitorToast("👏 РАУНД ВЫИГРАЛ СОПЕРНИК!", false);
+      resultHtml = `
+        <div style="text-align:center;">
+          <h3 style="color:var(--gold); margin-bottom:6px;">👏 Раунд выиграл соперник (${t ? t.oppName : ''})</h3>
+          <div style="font-size:12px; color:var(--gold); font-weight:700;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
+        </div>
+      `;
+    }
+
+    if (textLabel) textLabel.innerHTML = resultHtml;
+
+    if (optionsBox) {
+      optionsBox.innerHTML = `
+        <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; padding: 14px; font-weight: 800; font-size: 14px; margin-bottom: 8px;" onclick="app.requestLiveTTFRestart()">
+          🔄 Следующий раунд 🎯
+        </button>
+        <button class="btn btn-secondary" style="grid-column: 1 / -1; width: 100%; padding: 10px; font-size: 12px; font-weight: 700;" onclick="app.visitorExitActiveGame()">
+          🚪 Вернуться в Лобби
+        </button>
+      `;
+    }
+  }
+
+  requestLiveTTFRestart() {
+    this.sendNetworkMessage({ type: 'ttt_rematch', gameId: 4 });
+    this.initTTFTournament(true);
   }
 
   renderActiveGameQuestion() {
