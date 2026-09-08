@@ -334,48 +334,80 @@ class WaitPlayApp {
       const urlParams = new URLSearchParams(window.location.search);
       const roleParam = urlParams.get('role');
       const locParam = urlParams.get('loc');
+      const isGuestUrl = (roleParam === 'guest') || urlParams.has('guest') || !!locParam;
 
-      if (roleParam === 'guest' || locParam) {
+      // Always setup player profile & connect to real-time network immediately on startup
+      const targetLoc = this.normalizeVenueId(locParam || this.state.activeBranchId || 'br_main');
+      this.state.visitorConnectedBranchId = targetLoc;
+      this.ensureMyPlayerProfile();
+      this.initRealtimeNetwork(targetLoc);
+
+      if (isGuestUrl) {
         // GUEST / VISITOR ROUTING
-        const targetLoc = this.normalizeVenueId(locParam || this.state.activeBranchId);
-        this.state.visitorConnectedBranchId = targetLoc;
-        
+        this.state.isVisitorMode = true;
+        this.state.email = null;
+
         const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
         adminScreens.forEach(s => {
           s.style.display = 'none';
         });
 
-        const visitorFrame = document.getElementById('visitor-frame');
-        if (visitorFrame) {
-          visitorFrame.style.display = 'flex';
-        }
-
-        this.ensureMyPlayerProfile();
-        this.initRealtimeNetwork(targetLoc);
-        this.initVisitorLobby();
-      } else {
-        // ADMIN / OWNER ROUTING
-        const visitorFrame = document.getElementById('visitor-frame');
-        if (visitorFrame) {
-          visitorFrame.style.display = 'none';
-        }
-
-        const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
-        adminScreens.forEach(s => {
-          s.style.display = 'flex';
+        const allFrames = document.querySelectorAll('.phone-frame');
+        allFrames.forEach(f => {
+          if (f.id === 'visitor-frame') f.style.display = 'flex';
+          else f.style.display = 'none';
         });
 
-        if (this.state.consentAccepted || this.state.email) {
-          if (!this.state.activeBranchId) this.state.activeBranchId = 'br_' + Math.random().toString(36).substring(2, 7) + Date.now().toString(36).slice(-4);
-          if (!this.state.activeBranchName) this.state.activeBranchName = 'Моё заведение 🎮';
-          this.setAdminPanelActiveView('dashboard');
-          this.updateAdminView();
-        } else {
-          this.setAdminPanelActiveView('welcome-choice');
-        }
+        this.initVisitorLobby();
+        return;
       }
-    } catch(e) {
-      console.error("Error in app.init:", e);
+
+      // ADMIN / OWNER ROUTING
+      this.initDatabaseClients();
+      this.normalizeGameNames();
+      
+      if (this.state.email && this.state.activeBranchId) {
+        this.loadBranchContext(this.state.email, this.state.activeBranchId);
+      }
+      
+      this.normalizeGameNames();
+      this.sortGames();
+      this.initDOM();
+
+      const allFrames = document.querySelectorAll('.phone-frame');
+      allFrames.forEach(f => {
+        if (f.id === 'visitor-frame') f.style.display = 'none';
+        else f.style.display = 'flex';
+      });
+
+      this.updateAdminView();
+      this.updateVisitorView();
+      this.startLockoutTicker();
+      this.recalculateDistances();
+      this.detectBankingApps();
+      this.renderCreatorTicketsList();
+      this.renderCreatorAILogs();
+      this.renderCreatorClientsList();
+      
+      if (this.state.creatorScale) {
+        this.setCreatorScale(this.state.creatorScale);
+        const select = document.getElementById('creator-scale-select');
+        if (select) select.value = this.state.creatorScale;
+      }
+      if (this.state.creatorFullscreen) {
+        this.toggleCreatorFullscreen();
+      }
+
+      if (this.state.consentAccepted || this.state.email) {
+        if (!this.state.activeBranchId) this.state.activeBranchId = 'br_' + Math.random().toString(36).substring(2, 7) + Date.now().toString(36).slice(-4);
+        if (!this.state.activeBranchName) this.state.activeBranchName = 'Моё заведение 🎮';
+        this.setAdminPanelActiveView('dashboard');
+        this.updateAdminView();
+      } else {
+        this.setAdminPanelActiveView('welcome-choice');
+      }
+    } catch (e) {
+      console.error("Runtime Error inside init():", e);
     }
   }
 
@@ -397,103 +429,6 @@ class WaitPlayApp {
       }
     } catch(e) {
       console.error("Error in initVisitorLobby:", e);
-    }
-  }
-
-  getActiveCrosswordPreset(diff, layoutIdx) {
-    const basePreset = CROSSWORD_PRESETS[diff].layouts[layoutIdx || 0];
-    const preset = JSON.parse(JSON.stringify(basePreset));
-    
-    const key = `${diff}_${layoutIdx || 0}`;
-    if (this.state.crosswordCustomWords && this.state.crosswordCustomWords[key]) {
-      const customs = this.state.crosswordCustomWords[key];
-      preset.words.forEach(w => {
-        if (customs[w.id]) {
-          w.word = customs[w.id].word;
-          w.clue = customs[w.id].clue;
-        }
-      });
-    }
-    return preset;
-  }
-
-  init() {
-    try {
-      // Check if URL query contains guest mode params (?role=guest, ?guest=1, ?loc=...) FIRST!
-      const urlParams = new URLSearchParams(window.location.search);
-      const isGuestUrl = (urlParams.has('role') && urlParams.get('role') === 'guest') || urlParams.has('guest') || urlParams.has('loc');
-      
-      if (isGuestUrl) {
-        this.state.isVisitorMode = true;
-        this.state.email = null; // Clear admin email for guest context!
-        this.initDOM();
-        
-        // Hide Admin frame completely, show Visitor frame for Guest Phone!
-        const allFrames = document.querySelectorAll('.phone-frame');
-        allFrames.forEach(f => {
-          if (f.id === 'visitor-frame') {
-            f.style.display = 'block';
-          } else {
-            f.style.display = 'none';
-          }
-        });
-
-        if (this.state.maxVenuePlayers === 0) {
-          this.state.visitorActiveView = 'locked';
-          this.setVisitorViewPanel('locked');
-          this.showToast("🔒 Доступ к играм заблокирован администратором локации!", true);
-        } else {
-          this.state.visitorActiveView = 'lobby';
-          this.setVisitorViewPanel('lobby');
-          this.initVisitorLobby();
-          this.showToast("🎮 Добро пожаловать в игровое пространство!", false);
-        }
-        return; // STOP execution here so admin context never loads for guest!
-      }
-
-      this.initDatabaseClients();
-      this.loadState();
-      
-      this.normalizeGameNames();
-      
-      // Auto-load active branch context on reload (F5) to persist settings & game states
-      if (this.state.email && this.state.activeBranchId) {
-        this.loadBranchContext(this.state.email, this.state.activeBranchId);
-      }
-      
-      this.normalizeGameNames();
-      this.sortGames();
-      this.initDOM();
-
-      const allFrames = document.querySelectorAll('.phone-frame');
-      allFrames.forEach(f => {
-        if (f.id === 'visitor-frame') {
-          f.style.display = 'none';
-        } else {
-          f.style.display = 'block';
-        }
-      });
-
-      this.updateAdminView();
-      this.updateVisitorView();
-
-      this.startLockoutTicker();
-      this.recalculateDistances();
-      this.detectBankingApps();
-      this.renderCreatorTicketsList();
-      this.renderCreatorAILogs();
-      this.renderCreatorClientsList();
-      
-      if (this.state.creatorScale) {
-        this.setCreatorScale(this.state.creatorScale);
-        const select = document.getElementById('creator-scale-select');
-        if (select) select.value = this.state.creatorScale;
-      }
-      if (this.state.creatorFullscreen) {
-        this.toggleCreatorFullscreen();
-      }
-    } catch (e) {
-      console.error("Runtime Error inside init():", e);
     }
   }
 
@@ -5935,48 +5870,7 @@ class WaitPlayApp {
     return null;
   }
 
-  initVisitorLobby() {
-    const titleEl = document.getElementById('visitor-venue-title');
-    if (titleEl) titleEl.innerText = "WaitPlay";
 
-    const branch = this.getVisitorConnectedBranch();
-    const branchName = branch ? branch.name : (this.state.activeBranchName || "WaitPlay");
-    const welcomeMsg = branch ? (branch.welcomeMsg || '') : (this.state.welcomeMsg || '');
-
-    const venueDisplay = document.getElementById('visitor-venue-name-display');
-    if (venueDisplay) venueDisplay.innerText = branchName;
-
-    const limitCompact = document.getElementById('visitor-limit-badge-compact');
-    if (limitCompact) limitCompact.innerText = `${this.state.visitorGamesPlayed} / 2`;
-
-    const welcomeBox = document.getElementById('visitor-lobby-welcome-box');
-    const welcomeText = document.getElementById('visitor-lobby-welcome-text');
-    if (welcomeBox && welcomeText) {
-      if (welcomeMsg && welcomeMsg.trim() !== '') {
-        welcomeText.innerText = welcomeMsg;
-        welcomeBox.style.display = 'flex';
-        
-        // Reset collapse state
-        welcomeText.style.maxHeight = '32px';
-        const toggleEl = document.getElementById('visitor-lobby-welcome-toggle');
-        const arrowEl = document.getElementById('visitor-lobby-welcome-arrow');
-        if (toggleEl) {
-          if (welcomeMsg.length > 55) {
-            toggleEl.style.display = 'flex';
-            toggleEl.querySelector('span').innerText = 'Читать полностью';
-            if (arrowEl) arrowEl.innerText = '▼';
-          } else {
-            toggleEl.style.display = 'none';
-            welcomeText.style.maxHeight = 'none';
-          }
-        }
-      } else {
-        welcomeBox.style.display = 'none';
-      }
-    }
-
-    this.renderVisitorLobbyGames();
-  }
 
   ensureMyPlayerProfile() {
     if (!this.myPlayerId) {
@@ -6031,8 +5925,8 @@ class WaitPlayApp {
     }
 
     const brokers = [
-      'wss://broker.hivemq.com:8884/mqtt',
       'wss://broker.emqx.io:8084/mqtt',
+      'wss://broker.hivemq.com:8884/mqtt',
       'wss://test.mosquitto.org:8081'
     ];
 
@@ -6148,6 +6042,12 @@ class WaitPlayApp {
       const targetGId = Number(data.gameId);
       const myGId = Number(this.state.visitorSelectedGameId);
 
+      this.activeRoomQueue = {
+        gameId: targetGId,
+        queueEndTime: data.queueEndTime || (Date.now() + 15000),
+        initiator: data.senderId
+      };
+
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[data.senderId] = {
         ...(data.profile || {}),
@@ -6157,18 +6057,31 @@ class WaitPlayApp {
       };
 
       if (myGId === targetGId) {
+        if (data.queueEndTime && data.queueEndTime > Date.now()) {
+          if (!this.activeQueueEndTime || data.queueEndTime < this.activeQueueEndTime) {
+            this.activeQueueEndTime = data.queueEndTime;
+          }
+        }
+
         this.updateLiveQueueUI();
 
         // Bi-directional handshake: reply with queue_presence
         this.sendNetworkMessage({
           type: 'queue_presence',
           gameId: targetGId,
+          queueEndTime: this.activeQueueEndTime || data.queueEndTime,
           profile: this.myPlayerProfile
         });
       }
     } else if (data.type === 'queue_presence') {
       const targetGId = Number(data.gameId);
       const myGId = Number(this.state.visitorSelectedGameId);
+
+      this.activeRoomQueue = {
+        gameId: targetGId,
+        queueEndTime: data.queueEndTime || (Date.now() + 15000),
+        initiator: data.senderId
+      };
 
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[data.senderId] = {
@@ -6177,6 +6090,12 @@ class WaitPlayApp {
         gameId: targetGId,
         joinTime: data.timestamp || Date.now()
       };
+
+      if (data.queueEndTime && data.queueEndTime > Date.now()) {
+        if (!this.activeQueueEndTime || data.queueEndTime < this.activeQueueEndTime) {
+          this.activeQueueEndTime = data.queueEndTime;
+        }
+      }
 
       if (myGId === targetGId) {
         this.updateLiveQueueUI();
@@ -6384,7 +6303,9 @@ class WaitPlayApp {
       const gId = Number(gameId);
       this.ensureMyPlayerProfile();
       
-      this.initRealtimeNetwork(this.state.visitorConnectedBranchId);
+      if (!this.mqttClient || !this.mqttClient.connected) {
+        this.initRealtimeNetwork(this.state.visitorConnectedBranchId);
+      }
 
       if (this.state.manualTestingMode) {
         this.showVisitorToast("🛠️ В данный момент ведутся технические работы. Игры временно недоступны!", true);
@@ -6394,13 +6315,23 @@ class WaitPlayApp {
       this.state.visitorSelectedGameId = gId;
       this.saveState();
 
+      // Synchronized 15-second room timer
+      let queueEndTime = Date.now() + 15000;
+      if (this.activeRoomQueue && Number(this.activeRoomQueue.gameId) === gId && this.activeRoomQueue.queueEndTime > Date.now()) {
+        queueEndTime = this.activeRoomQueue.queueEndTime;
+      }
+      this.activeQueueEndTime = queueEndTime;
+      this.myQueueJoinTime = Date.now();
+
       this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
         gameId: gId,
-        joinTime: Date.now()
+        joinTime: this.myQueueJoinTime
       };
+
+      const remainingSec = Math.max(1, Math.ceil((this.activeQueueEndTime - Date.now()) / 1000));
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6411,7 +6342,7 @@ class WaitPlayApp {
             <div class="lobby-radar-pulse"></div>
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
-          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">15 сек</div>
+          <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${remainingSec} сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
         `;
@@ -6420,38 +6351,37 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
-      // Announce join
+      // Announce join with synchronized queueEndTime
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gId,
+        queueEndTime: this.activeQueueEndTime,
         profile: this.myPlayerProfile
       });
 
-      // Simple, robust 15-second countdown
+      // Synchronized 1-second ticker
       clearInterval(this.state.lobbyCountdown);
-      let remainingSec = 15;
-
       this.state.lobbyCountdown = setInterval(() => {
-        remainingSec--;
-        if (remainingSec < 0) remainingSec = 0;
+        const remaining = Math.max(0, Math.ceil((this.activeQueueEndTime - Date.now()) / 1000));
 
         const timerEl = document.getElementById('lobby-countdown-timer');
-        if (timerEl) timerEl.innerText = `${remainingSec} сек`;
+        if (timerEl) timerEl.innerText = `${remaining} сек`;
 
-        // Keep broadcasting presence every 2 seconds
-        if (remainingSec % 2 === 0) {
+        // Broadcast presence during countdown
+        if (remaining % 2 === 0) {
           this.sendNetworkMessage({
             type: 'queue_join',
             gameId: gId,
+            queueEndTime: this.activeQueueEndTime,
             profile: this.myPlayerProfile
           });
         }
 
-        if (remainingSec <= 0) {
+        if (remaining <= 0) {
           clearInterval(this.state.lobbyCountdown);
           this.finishQueueMatchmaking(gId);
         }
-      }, 1000);
+      }, 500);
     } catch(e) {
       console.error("Error in visitorJoinLobby:", e);
     }
@@ -6486,6 +6416,7 @@ class WaitPlayApp {
       const exitingGameId = Number(this.state.visitorSelectedGameId);
       this.state.visitorSelectedGameId = null;
       this.queuePlayers = {};
+      this.activeQueueEndTime = null;
 
       const overlay = document.getElementById('lobby-queue-overlay');
       if (overlay) {
@@ -6582,7 +6513,9 @@ class WaitPlayApp {
     let drawsCount = (this.state.tttTournament && this.state.tttTournament.drawsCount) || 0;
     if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
 
-    const otherPlayers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+    const queueOthers = Object.values(this.queuePlayers || {}).filter(p => p && p.id !== this.myPlayerId);
+    const liveOthers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+    const otherPlayers = (queueOthers.length > 0) ? queueOthers : liveOthers;
 
     let isHost = true;
     let mySymbol = 'X';
