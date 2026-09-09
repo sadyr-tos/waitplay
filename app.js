@@ -278,7 +278,7 @@ class WaitPlayApp {
       // Visitor session
       visitorGamesPlayed: 0,
       visitorLockoutUntil: 0,
-      visitorActiveView: 'locked', 
+      visitorActiveView: 'lobby', 
       visitorSelectedGameId: null,
       crosswordLayoutIndex: 0,
       crosswordCustomWords: {},
@@ -353,7 +353,9 @@ class WaitPlayApp {
       const urlParams = new URLSearchParams(window.location.search);
       const roleParam = urlParams.get('role');
       const locParam = urlParams.get('loc');
-      const isGuestUrl = (roleParam === 'guest') || urlParams.has('guest') || !!locParam;
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 800);
+      const isExplicitAdmin = (roleParam === 'admin') || urlParams.has('admin');
+      const isGuestUrl = !isExplicitAdmin && (roleParam === 'guest' || urlParams.has('guest') || !!locParam || isMobileDevice || !this.state.email || !this.state.consentAccepted);
 
       // Always setup player profile & connect to real-time network immediately on startup
       const targetLoc = this.normalizeVenueId(locParam || this.state.activeBranchId || 'br_main');
@@ -362,9 +364,9 @@ class WaitPlayApp {
       this.initRealtimeNetwork(targetLoc);
 
       if (isGuestUrl) {
-        // GUEST / VISITOR ROUTING
+        // GUEST / VISITOR ROUTING (Automatic mobile & guest lobby mode)
         this.state.isVisitorMode = true;
-        this.state.email = null;
+        this.state.visitorActiveView = 'lobby';
 
         const adminScreens = document.querySelectorAll('.screen:not(.visitor-screen)');
         adminScreens.forEach(s => {
@@ -377,6 +379,7 @@ class WaitPlayApp {
           else f.style.display = 'none';
         });
 
+        this.setVisitorViewPanel('lobby');
         this.initVisitorLobby();
         return;
       }
@@ -5877,6 +5880,9 @@ class WaitPlayApp {
   }
 
   initVisitorLobby() {
+    this.state.visitorActiveView = 'lobby';
+    this.setVisitorViewPanel('lobby');
+
     const titleEl = document.getElementById('visitor-venue-title');
     if (titleEl) titleEl.innerText = "WaitPlay";
 

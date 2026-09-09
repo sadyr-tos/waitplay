@@ -7,9 +7,9 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="icon-192.png">
   <meta name="theme-color" content="#0b0a13">
-  <link rel="stylesheet" href="style.css?v=67.0.0">
+  <link rel="stylesheet" href="style.css?v=68.0.0">
   <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
-  <script src="app.js?v=67.0.0"></script>
+  <script src="app.js?v=68.0.0"></script>
   <script>
     // Force unregister any stale service workers & purge CacheStorage
     if ('serviceWorker' in navigator) {
@@ -1131,7 +1131,7 @@
         </div>
 
         <!-- SUB-VIEW 1: QR CODE REQUIREMENT -->
-        <div id="visitor-locked-panel" class="view-panel active">
+        <div id="visitor-locked-panel" class="view-panel">
           <div class="visitor-block-screen">
             <div class="visitor-block-icon">📲</div>
             <h3 style="font-size: 16px; font-weight: 700;">Отсканируйте QR-код</h3>
@@ -1199,7 +1199,7 @@
         </div>
 
         <!-- SUB-VIEW 4: GAME SELECTION / LOBBY -->
-        <div id="visitor-lobby-panel" class="view-panel" style="position: relative;">
+        <div id="visitor-lobby-panel" class="view-panel active" style="position: relative;">
           
           <!-- Scanned Info & Limits Split Card -->
           <div style="display: flex; gap: 8px; margin-bottom: 12px; width: 100%;">
@@ -1246,7 +1246,7 @@
           <div class="games-grid" id="visitor-lobby-games-list">
             <!-- 10 game slots rendered by JS. Blocked ones show locks. -->
           </div>
-          <div style="text-align: center; margin-top: 22px; margin-bottom: 12px; font-size: 10px; color: var(--text-muted); opacity: 0.6; letter-spacing: 0.5px;">⚡ WaitPlay v67.0.0</div>
+          <div style="text-align: center; margin-top: 22px; margin-bottom: 12px; font-size: 10px; color: var(--text-muted); opacity: 0.6; letter-spacing: 0.5px;">⚡ WaitPlay v68.0.0</div>
         </div>
 
         <!-- SUB-VIEW 5: ACTIVE PLAYING SCREEN -->
