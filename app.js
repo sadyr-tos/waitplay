@@ -327,6 +327,25 @@ class WaitPlayApp {
     return id;
   }
 
+
+
+  getActiveCrosswordPreset(diff, layoutIdx) {
+    const basePreset = CROSSWORD_PRESETS[diff].layouts[layoutIdx || 0];
+    const preset = JSON.parse(JSON.stringify(basePreset));
+    
+    const key = `${diff}_${layoutIdx || 0}`;
+    if (this.state.crosswordCustomWords && this.state.crosswordCustomWords[key]) {
+      const customs = this.state.crosswordCustomWords[key];
+      preset.words.forEach(w => {
+        if (customs[w.id]) {
+          w.word = customs[w.id].word;
+          w.clue = customs[w.id].clue;
+        }
+      });
+    }
+    return preset;
+  }
+
   init() {
     try {
       this.loadState();
@@ -408,27 +427,6 @@ class WaitPlayApp {
       }
     } catch (e) {
       console.error("Runtime Error inside init():", e);
-    }
-  }
-
-  initVisitorLobby() {
-    try {
-      this.setVisitorViewPanel('lobby');
-      this.renderVisitorLobbyGames();
-      
-      const branch = this.getVisitorConnectedBranch();
-      const venueName = branch ? branch.name : (this.state.activeBranchName || 'WaitPlay Заведение');
-      const titleEl = document.getElementById('visitor-venue-title');
-      const displayEl = document.getElementById('visitor-venue-name-display');
-      if (titleEl) titleEl.innerText = venueName;
-      if (displayEl) displayEl.innerText = venueName;
-
-      const badgeEl = document.getElementById('visitor-limit-badge-compact');
-      if (badgeEl) {
-        badgeEl.innerText = `${this.state.visitorGamesPlayed || 0} / 2`;
-      }
-    } catch(e) {
-      console.error("Error in initVisitorLobby:", e);
     }
   }
 
@@ -702,6 +700,14 @@ class WaitPlayApp {
     } catch(e) {
       console.error("Error in broadcastBranchConfig:", e);
     }
+  }
+
+  syncActiveBranchToDatabase() {
+    try {
+      if (typeof this.syncActiveBranchToBranchesList === 'function') {
+        this.syncActiveBranchToBranchesList();
+      }
+    } catch(e) {}
   }
 
   saveState() {
@@ -5870,7 +5876,48 @@ class WaitPlayApp {
     return null;
   }
 
+  initVisitorLobby() {
+    const titleEl = document.getElementById('visitor-venue-title');
+    if (titleEl) titleEl.innerText = "WaitPlay";
 
+    const branch = this.getVisitorConnectedBranch();
+    const branchName = branch ? branch.name : (this.state.activeBranchName || "WaitPlay");
+    const welcomeMsg = branch ? (branch.welcomeMsg || '') : (this.state.welcomeMsg || '');
+
+    const venueDisplay = document.getElementById('visitor-venue-name-display');
+    if (venueDisplay) venueDisplay.innerText = branchName;
+
+    const limitCompact = document.getElementById('visitor-limit-badge-compact');
+    if (limitCompact) limitCompact.innerText = `${this.state.visitorGamesPlayed} / 2`;
+
+    const welcomeBox = document.getElementById('visitor-lobby-welcome-box');
+    const welcomeText = document.getElementById('visitor-lobby-welcome-text');
+    if (welcomeBox && welcomeText) {
+      if (welcomeMsg && welcomeMsg.trim() !== '') {
+        welcomeText.innerText = welcomeMsg;
+        welcomeBox.style.display = 'flex';
+        
+        // Reset collapse state
+        welcomeText.style.maxHeight = '32px';
+        const toggleEl = document.getElementById('visitor-lobby-welcome-toggle');
+        const arrowEl = document.getElementById('visitor-lobby-welcome-arrow');
+        if (toggleEl) {
+          if (welcomeMsg.length > 55) {
+            toggleEl.style.display = 'flex';
+            toggleEl.querySelector('span').innerText = 'Читать полностью';
+            if (arrowEl) arrowEl.innerText = '▼';
+          } else {
+            toggleEl.style.display = 'none';
+            welcomeText.style.maxHeight = 'none';
+          }
+        }
+      } else {
+        welcomeBox.style.display = 'none';
+      }
+    }
+
+    this.renderVisitorLobbyGames();
+  }
 
   ensureMyPlayerProfile() {
     if (!this.myPlayerId) {
@@ -6033,6 +6080,7 @@ class WaitPlayApp {
             ...data.profile,
             id: data.senderId,
             gameId: Number(data.gameId),
+            lastSeen: Date.now(),
             joinTime: data.joinTime || Date.now()
           };
           this.updateLiveQueueUI();
@@ -6053,6 +6101,7 @@ class WaitPlayApp {
         ...(data.profile || {}),
         id: data.senderId,
         gameId: targetGId,
+        lastSeen: Date.now(),
         joinTime: data.timestamp || Date.now()
       };
 
@@ -6065,7 +6114,7 @@ class WaitPlayApp {
 
         this.updateLiveQueueUI();
 
-        // Bi-directional handshake: reply with queue_presence
+        // Bi-directional handshake: reply with queue_presence including synchronized queueEndTime
         this.sendNetworkMessage({
           type: 'queue_presence',
           gameId: targetGId,
@@ -6088,6 +6137,7 @@ class WaitPlayApp {
         ...(data.profile || {}),
         id: data.senderId,
         gameId: targetGId,
+        lastSeen: Date.now(),
         joinTime: data.timestamp || Date.now()
       };
 
@@ -6166,21 +6216,18 @@ class WaitPlayApp {
     const now = Date.now();
     let changed = false;
     
-    // Purge dead corridor presence (relaxed to 15000ms to avoid aggressive drops on mobile)
+    // Purge dead corridor presence (60 seconds tolerance)
     for (const [id, player] of Object.entries(this.livePlayers || {})) {
-      if (id !== this.myPlayerId && now - (player.lastSeen || 0) > 15000) {
+      if (id !== this.myPlayerId && now - (player.lastSeen || player.timestamp || now) > 60000) {
         delete this.livePlayers[id];
-        if (this.queuePlayers && this.queuePlayers[id]) {
-          delete this.queuePlayers[id];
-        }
         changed = true;
       }
     }
 
-    // Purge dead queue entries
+    // Purge dead queue entries (60 seconds tolerance)
     for (const [id, qp] of Object.entries(this.queuePlayers || {})) {
       if (id !== this.myPlayerId) {
-        if (now - (qp.lastSeen || 0) > 15000) {
+        if (now - (qp.lastSeen || qp.joinTime || qp.timestamp || now) > 60000) {
           delete this.queuePlayers[id];
           changed = true;
         }
@@ -6328,6 +6375,7 @@ class WaitPlayApp {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
         gameId: gId,
+        lastSeen: Date.now(),
         joinTime: this.myQueueJoinTime
       };
 
@@ -6344,7 +6392,7 @@ class WaitPlayApp {
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
           <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${remainingSec} сек</div>
           <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
-          <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="app.visitorLeaveQueue()">Отмена ✖</button>
+          <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="window.app.visitorLeaveQueue()">Отмена ✖</button>
         `;
       }
 
@@ -6359,7 +6407,7 @@ class WaitPlayApp {
         profile: this.myPlayerProfile
       });
 
-      // Synchronized 1-second ticker
+      // Synchronized ticker
       clearInterval(this.state.lobbyCountdown);
       this.state.lobbyCountdown = setInterval(() => {
         const remaining = Math.max(0, Math.ceil((this.activeQueueEndTime - Date.now()) / 1000));
@@ -6367,7 +6415,7 @@ class WaitPlayApp {
         const timerEl = document.getElementById('lobby-countdown-timer');
         if (timerEl) timerEl.innerText = `${remaining} сек`;
 
-        // Broadcast presence during countdown
+        // Continuous presence heartbeat during countdown
         if (remaining % 2 === 0) {
           this.sendNetworkMessage({
             type: 'queue_join',
@@ -6410,6 +6458,29 @@ class WaitPlayApp {
     }
   }
 
+  spawnRadarAvatar(avatar, index) {
+    const radarBox = document.getElementById('visitor-radar-box');
+    if (!radarBox) return;
+    
+    const el = document.createElement('div');
+    el.className = 'radar-avatar';
+    el.innerText = avatar || '🐼';
+    
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 25 + Math.random() * 8;
+    const x = Math.cos(angle) * radius + 35;
+    const y = Math.sin(angle) * radius + 35;
+    
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    
+    const dx = (Math.random() - 0.5) * 8;
+    const dy = (Math.random() - 0.5) * 8;
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    
+    radarBox.appendChild(el);
+  }
+
   visitorLeaveQueue() {
     try {
       clearInterval(this.state.lobbyCountdown);
@@ -6424,22 +6495,7 @@ class WaitPlayApp {
         overlay.innerHTML = '';
       }
 
-      const gamePanel = document.getElementById('visitor-game-panel');
-      if (gamePanel) {
-        gamePanel.classList.remove('active');
-        gamePanel.style.display = 'none';
-      }
-      const resultsPanel = document.getElementById('visitor-results-panel');
-      if (resultsPanel) {
-        resultsPanel.classList.remove('active');
-        resultsPanel.style.display = 'none';
-      }
-      const lobbyPanel = document.getElementById('visitor-lobby-panel');
-      if (lobbyPanel) {
-        lobbyPanel.classList.add('active');
-        lobbyPanel.style.display = 'flex';
-      }
-
+      this.setVisitorViewPanel('lobby');
       this.broadcastNetworkPresence();
 
       this.sendNetworkMessage({
@@ -6458,8 +6514,10 @@ class WaitPlayApp {
     try {
       const gId = Number(gameId);
       const overlay = document.getElementById('lobby-queue-overlay');
+      
+      // Look in both queuePlayers and livePlayers for any active peers
       const inQueue = Object.values(this.queuePlayers || {}).filter(p => p && Number(p.gameId) === gId);
-      const totalLiveInQueue = inQueue.length;
+      const totalLiveInQueue = Math.max(inQueue.length, Object.keys(this.queuePlayers || {}).length);
 
       if (totalLiveInQueue < 2) {
         if (overlay) {
@@ -6467,7 +6525,7 @@ class WaitPlayApp {
             <div style="font-size:36px; margin-bottom:10px; animation: bounce 1s infinite;">⚠️</div>
             <h3 style="color:#fff; margin-bottom:6px; font-size:16px; font-weight:800;">Недостаточно игроков</h3>
             <p style="font-size:11px; color:var(--text-muted); margin-bottom:16px; line-height:1.4;">Для игры нужно минимум 2 игрока (набралось: ${totalLiveInQueue}).</p>
-            <button class="btn btn-primary" style="padding:10px 24px; font-size:12px; font-weight:800; cursor:pointer;" onclick="app.visitorLeaveQueue()">Закрыть ✖</button>
+            <button class="btn btn-primary" style="padding:10px 24px; font-size:12px; font-weight:800; cursor:pointer;" onclick="window.app.visitorLeaveQueue()">Закрыть ✖</button>
           `;
         }
         return;
@@ -6514,7 +6572,7 @@ class WaitPlayApp {
     if (!isNextRound) { scoreX = 0; scoreO = 0; drawsCount = 0; }
 
     const queueOthers = Object.values(this.queuePlayers || {}).filter(p => p && p.id !== this.myPlayerId);
-    const liveOthers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (p.gameId === 4 || !p.gameId));
+    const liveOthers = Object.values(this.livePlayers || {}).filter(p => p && p.id !== this.myPlayerId && (Number(p.gameId) === 4 || !p.gameId));
     const otherPlayers = (queueOthers.length > 0) ? queueOthers : liveOthers;
 
     let isHost = true;
@@ -10668,7 +10726,7 @@ class WaitPlayApp {
     }
   }
 
-  openShareQrModal(guestUrl) {
+    openShareQrModal(guestUrl) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(guestUrl).catch(() => {});
     }
@@ -10695,205 +10753,10 @@ class WaitPlayApp {
 
         <div style="margin-bottom: 14px;">
           <input type="text" readonly value="${guestUrl}" id="share-modal-url-input" style="width: 100%; font-size: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-light); color: #fff; padding: 8px; border-radius: 8px; text-align: center; box-sizing: border-box; font-family: inherit;">
-          <button class="btn btn-primary" onclick="app.copyShareUrlFromInput()" style="margin-top: 6px; width: 100%; padding: 8px; font-size: 11px; font-weight: 700;">📋 Скопировать ссылку на Лобби</button>
+          <button class="btn btn-primary" onclick="window.app.copyShareUrlFromInput()" style="margin-top: 6px; width: 100%; padding: 8px; font-size: 11px; font-weight: 700;">📋 Скопировать ссылку на Лобби</button>
         </div>
 
-        <button class="btn btn-secondary" style="width: 100%; padding: 10px; font-size: 11px; font-weight: 700; margin-bottom: 8px;" onclick="app.resetAdminDevice() {
-    if (confirm("Сбросить устройство и выйти из аккаунта?")) {
-      this.resetAdminDeviceConfirm();
-    }
-  }
-
-  resetAdminDeviceConfirm() {
-    localStorage.clear();
-    sessionStorage.clear();
-    location.reload();
-  }
-
-  addBranchProceedToPayment() {
-    this.setAdminPanelActiveView('payment');
-  }
-
-  cancelAddBranch() {
-    this.setAdminPanelActiveView('select-branch');
-  }
-
-  selectPaymentMethod(method) {
-    this.selectedPaymentType = method;
-    this.showToast("Выбран способ оплаты: " + method, false);
-  }
-
-  adjustQuizMinPlayers(delta) {
-    let current = parseInt(this.state.quizMinPlayers) || 1;
-    let next = Math.max(1, Math.min(50, current + delta));
-    this.state.quizMinPlayers = next;
-    const el = document.getElementById('label-quiz-min-players');
-    if (el) el.innerText = next + " чел.";
-    this.saveState();
-  }
-
-  adjustQuizMaxPlayers(delta) {
-    let current = parseInt(this.state.quizMaxPlayers) || 15;
-    let next = Math.max(1, Math.min(50, current + delta));
-    this.state.quizMaxPlayers = next;
-    const el = document.getElementById('label-quiz-max-players');
-    if (el) el.innerText = next + " чел.";
-    this.saveState();
-  }
-
-  adjustChessTournamentSize(delta) {
-    let current = parseInt(this.state.chessSize) || 8;
-    let next = Math.max(2, Math.min(16, current + (delta * 2)));
-    this.state.chessSize = next;
-    const el = document.getElementById('label-chess-size');
-    if (el) el.innerText = next + " участников";
-    this.saveState();
-  }
-
-  adjustCakePlayersLimit(delta) {
-    let current = parseInt(this.state.cakePlayers) || 2;
-    let next = Math.max(2, Math.min(10, current + delta));
-    this.state.cakePlayers = next;
-    const el = document.getElementById('label-cake-players');
-    if (el) el.innerText = next + " чел.";
-    this.saveState();
-  }
-
-  adjustCakeSpeedLimit(delta) {
-    let current = parseInt(this.state.cakeSpeed) || 3;
-    let next = Math.max(1, Math.min(5, current + delta));
-    this.state.cakeSpeed = next;
-    const el = document.getElementById('label-cake-speed');
-    if (el) el.innerText = "Скорость: " + next;
-    this.saveState();
-  }
-
-  checkVisitorCapacitySlot() {
-    this.initVisitorLobby();
-  }
-
-  toggleWelcomeTextCollapse() {
-    const textEl = document.getElementById('visitor-lobby-welcome-text');
-    const arrowEl = document.getElementById('visitor-lobby-welcome-arrow');
-    if (textEl) {
-      const isExpanded = (textEl.style.maxHeight === 'none');
-      textEl.style.maxHeight = isExpanded ? '38px' : 'none';
-      if (arrowEl) arrowEl.innerText = isExpanded ? '▼' : '▲';
-    }
-  }
-
-  resetVisitorSession() {
-    sessionStorage.clear();
-    location.reload();
-  }
-
-  showGameRules(gameId, event) {
-    if (event) {
-      if (typeof event.stopPropagation === 'function') event.stopPropagation();
-      if (typeof event.preventDefault === 'function') event.preventDefault();
-    }
-
-    const gId = parseInt(gameId, 10);
-    const rules = {
-      1: {
-        title: "Викторина 🎯",
-        icon: "🎯",
-        text: "<b>Цель игры:</b> Отвечайте на интересные вопросы быстрее всех и набирайте максимум очков!<br><br>• <b>Количество участников:</b> от 2 до 15 человек.<br>• <b>Начисление очков:</b> за каждый правильный ответ начисляются баллы.<br>• <b>Победа:</b> побеждает участник с наибольшим количеством очков в конце раунда."
-      },
-      2: {
-        title: "Кроссворд 📝",
-        icon: "📝",
-        text: "<b>Цель игры:</b> Отгадывайте слова по подсказкам и заполняйте сетку кроссворда.<br><br>• <b>Участники:</b> от 2 до 10 человек.<br>• <b>Очки:</b> за каждое правильно угаданное слово начисляются баллы.<br>• <b>Победа:</b> игрок, разгадавший больше всех слов, занимает 1-е место!"
-      },
-      3: {
-        title: "Поле Чудес 🗣️",
-        icon: "🗣️",
-        text: "<b>Цель игры:</b> Открывайте буквы и назовите зашифрованное слово целиком!<br><br>• <b>Участники:</b> от 2 до 5 человек.<br>• <b>Победа:</b> побеждает тот, кто первым отгадает главное слово!"
-      },
-      4: {
-        title: "Крестики-нолики ❌⭕",
-        icon: "❌⭕",
-        text: "<b>Цель игры:</b> Соберите линию из трёх своих символов (по горизонтали, вертикали или диагонали) раньше соперника!<br><br>• <b>Формат:</b> Турнир или дуэль 1 на 1.<br>• <b>Смена сторон:</b> при каждом реванше право первого хода (Крестик ❌) переходит ко второму игроку!"
-      },
-      5: { title: "Мемори 🧠", icon: "🧠", text: "Открывайте парные карточки на скорость!" },
-      6: { title: "Найди отличия 🔍", icon: "🔍", text: "Найдите единственный отличающийся смайлик!" },
-      7: { title: "Нарезка 🔪", icon: "🔪", text: "Нарезайте летающие фрукты!" },
-      8: { title: "Торт до Небес 🎂", icon: "🎂", text: "Постройте самый высокий торт!" },
-      9: { title: "Шашки 🏁", icon: "🏁", text: "Классические русские шашки 1 на 1!" },
-      10: { title: "Шахматы ♟️", icon: "♟️", text: "Классические шахматы 1 на 1!" }
-    };
-
-    const gRule = rules[gId] || rules[gameId] || {
-      title: "Правила игры",
-      icon: "📋",
-      text: "Играйте честно, соблюдайте правила заведения и получайте призы за победу!"
-    };
-
-    let modal = document.getElementById('visitor-rules-modal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'visitor-rules-modal';
-      modal.className = 'modal-overlay';
-      modal.innerHTML = '<div class="modal-content" style="text-align: center; max-width: 300px; background: #18142c; border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); position: relative;"><div style="font-size: 36px; margin-bottom: 8px;" id="visitor-rules-icon">📋</div><h3 style="font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--gold);" id="visitor-rules-title">Правила игры</h3><div style="font-size: 11px; color: var(--text-main); line-height: 1.5; margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);" id="visitor-rules-content">Описание правил...</div><button class="btn btn-primary" style="padding: 8px 16px; font-size: 12px; width: 100%; border-radius: 8px; margin: 0; cursor: pointer;" onclick="app.closeVisitorRulesModal()">Понятно 👍</button></div>';
-      document.body.appendChild(modal);
-    }
-
-    const iconEl = document.getElementById('visitor-rules-icon');
-    const titleEl = document.getElementById('visitor-rules-title');
-    const contentEl = document.getElementById('visitor-rules-content');
-
-    if (iconEl) iconEl.innerText = gRule.icon;
-    if (titleEl) titleEl.innerText = gRule.title;
-    if (contentEl) contentEl.innerHTML = gRule.text;
-
-    modal.classList.add('active');
-    modal.style.display = 'flex';
-    modal.style.zIndex = '999999';
-  }
-
-  closeVisitorRulesModal() {
-    const m = document.getElementById('game-rules-modal') || document.getElementById('visitor-rules-modal');
-    if (m) m.style.display = 'none';
-  }
-
-  closeGoogleAuthModal() {
-    const m = document.getElementById('google-auth-modal');
-    if (m) m.style.display = 'none';
-  }
-
-  editBranchNameModal() {
-    const name = prompt("Введите новое название заведения:", this.state.activeBranchName || "");
-    if (name && name.trim()) {
-      this.state.activeBranchName = name.trim();
-      this.saveState();
-      this.renderAdminDashboard();
-      this.showToast("Название обновлено!", false);
-    }
-  }
-
-  editAccountEmailModal() {
-    const email = prompt("Введите новый Email:", this.state.email || "");
-    if (email && email.includes('@')) {
-      this.state.email = email.trim();
-      this.saveState();
-      this.renderAdminDashboard();
-      this.showToast("Email обновлен!", false);
-    }
-  }
-
-  deleteActiveBranch() {
-    if (confirm("Вы уверены, что хотите удалить эту локацию?")) {
-      this.showToast("Локация удалена", true);
-      this.setAdminPanelActiveView('select-branch');
-    }
-  }
-
-  closeAccountProfileModal() {
-    const m = document.getElementById('account-profile-modal');
-    if (m) m.style.display = 'none';
-  }
-
-  adminDownloadPrintPDF()">📥 Печать наклейки QR (PDF)</button>
+        <button class="btn btn-secondary" style="width: 100%; padding: 10px; font-size: 11px; font-weight: 700; margin-bottom: 8px;" onclick="window.app.adminDownloadPrintPDF()">📥 Печать наклейки QR (PDF)</button>
 
         <button class="btn btn-secondary" style="width: 100%; padding: 12px; font-size: 12px; font-weight: 700;" onclick="document.getElementById('share-qr-modal').classList.remove('active')">Закрыть окно ✖</button>
       </div>
@@ -10961,12 +10824,197 @@ class WaitPlayApp {
     } catch(e) {
       console.error("Error in adminDownloadPrintPDF:", e);
     }
+  }
+
+  resetAdminDevice() {
+    if (confirm("Сбросить устройство и выйти из аккаунта?")) {
+      this.resetAdminDeviceConfirm();
     }
   }
+
+  resetAdminDeviceConfirm() {
+    localStorage.clear();
+    sessionStorage.clear();
+    location.reload();
+  }
+
+  addBranchProceedToPayment() {
+    this.setAdminPanelActiveView('payment');
+  }
+
+  cancelAddBranch() {
+    this.setAdminPanelActiveView('select-branch');
+  }
+
+  selectPaymentMethod(method) {
+    this.selectedPaymentType = method;
+    this.showToast("Выбран способ оплаты: " + method, false);
+  }
+
+  submitBranchPayment() {
+    if (!this.selectedPaymentType) {
+      this.showToast("Выберите способ оплаты!", true);
+      return;
+    }
+    this.showToast("Оплата успешно завершена!", false);
+    this.setAdminPanelActiveView('select-branch');
+  }
+
+  openGoogleAuthModal() {
+    const m = document.getElementById('google-auth-modal');
+    if (m) m.style.display = 'flex';
+  }
+
+  closeGoogleAuthModal() {
+    const m = document.getElementById('google-auth-modal');
+    if (m) m.style.display = 'none';
+  }
+
+  editBranchNameModal() {
+    const name = prompt("Введите новое название заведения:", this.state.activeBranchName || "");
+    if (name && name.trim()) {
+      this.state.activeBranchName = name.trim();
+      this.saveState();
+      this.renderAdminDashboard();
+      this.showToast("Название обновлено!", false);
+    }
+  }
+
+  editAccountEmailModal() {
+    const email = prompt("Введите новый Email:", this.state.email || "");
+    if (email && email.includes('@')) {
+      this.state.email = email.trim();
+      this.saveState();
+      this.renderAdminDashboard();
+      this.showToast("Email обновлен!", false);
+    }
+  }
+
+  deleteActiveBranch() {
+    if (confirm("Вы уверены, что хотите удалить эту локацию?")) {
+      this.showToast("Локация удалена", true);
+      this.setAdminPanelActiveView('select-branch');
+    }
+  }
+
+  closeAccountProfileModal() {
+    const m = document.getElementById('account-profile-modal');
+    if (m) m.style.display = 'none';
+  }
+
+  toggleWelcomeTextCollapse() {
+    const textEl = document.getElementById('visitor-lobby-welcome-text');
+    const arrowEl = document.getElementById('visitor-lobby-welcome-arrow');
+    if (textEl) {
+      const isExpanded = (textEl.style.maxHeight === 'none');
+      textEl.style.maxHeight = isExpanded ? '38px' : 'none';
+      if (arrowEl) arrowEl.innerText = isExpanded ? '▼' : '▲';
+    }
+  }
+
+  resetVisitorSession() {
+    sessionStorage.clear();
+    location.reload();
+  }
+
+  showGameRules(gameId, event) {
+    if (event) {
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+    }
+
+    const gId = parseInt(gameId, 10);
+    const rules = {
+      1: {
+        title: "Викторина 🎯",
+        icon: "🎯",
+        text: "<b>Цель игры:</b> Отвечайте на интересные вопросы быстрее всех и набирайте максимум очков!<br><br>• <b>Количество участников:</b> от 2 до 15 человек.<br>• <b>Начисление очков:</b> за каждый правильный ответ начисляются баллы.<br>• <b>Победа:</b> побеждает участник с наибольшим количеством очков в конце раунда."
+      },
+      2: {
+        title: "Кроссворд 📝",
+        icon: "📝",
+        text: "<b>Цель игры:</b> Отгадывайте слова по подсказкам и заполняйте сетку кроссворда.<br><br>• <b>Участники:</b> от 2 до 10 человек.<br>• <b>Очки:</b> за каждое правильно угаданное слово начисляются баллы.<br>• <b>Победа:</b> игрок, разгадавший больше всех слов, занимает 1-е место!"
+      },
+      3: {
+        title: "Поле Чудес 🗣️",
+        icon: "🗣️",
+        text: "<b>Цель игры:</b> Открывайте буквы и назовите зашифрованное слово целиком!<br><br>• <b>Участники:</b> от 2 до 5 человек.<br>• <b>Победа:</b> побеждает тот, кто первым отгадает главное слово!"
+      },
+      4: {
+        title: "Крестики-нолики ❌⭕",
+        icon: "❌⭕",
+        text: "<b>Цель игры:</b> Соберите линию из трёх своих символов (по горизонтали, вертикали или диагонали) раньше соперника!<br><br>• <b>Формат:</b> Турнир или дуэль 1 на 1.<br>• <b>Смена сторон:</b> при каждом реванше право первого хода (Крестик ❌) переходит ко второму игроку!"
+      },
+      5: { title: "Мемори 🧠", icon: "🧠", text: "Открывайте парные карточки на скорость и находите одинаковые картинки!" },
+      6: { title: "Найди отличия 🔍", icon: "🔍", text: "Найдите единственный отличающийся смайлик в сетке быстрее всех!" },
+      7: { title: "Нарезка 🔪", icon: "🔪", text: "Нарезайте летающие фрукты и не задевайте бомбы!" },
+      8: { title: "Торт до Небес 🎂", icon: "🎂", text: "Постройте самый высокий торт, точно укладывая коржи!" },
+      9: { title: "Шашки 🏁", icon: "🏁", text: "Классические русские шашки 1 на 1 против живого соперника!" },
+      10: { title: "Шахматы ♟️", icon: "♟️", text: "Классические шахматы 1 на 1 против живого соперника!" }
+    };
+
+    const gRule = rules[gId] || rules[gameId] || {
+      title: "Правила игры",
+      icon: "📋",
+      text: "Играйте честно, соблюдайте правила заведения и получайте призы за победу!"
+    };
+
+    let modal = document.getElementById('visitor-rules-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'visitor-rules-modal';
+      modal.className = 'modal-overlay';
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.width = '100%';
+      modal.style.height = '100%';
+      modal.style.backgroundColor = 'rgba(5, 4, 10, 0.88)';
+      modal.style.backdropFilter = 'blur(8px)';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.padding = '20px';
+      modal.style.boxSizing = 'border-box';
+      modal.innerHTML = '<div class="modal-content" style="text-align: center; max-width: 300px; background: #18142c; border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); position: relative;"><div style="font-size: 36px; margin-bottom: 8px;" id="visitor-rules-icon">📋</div><h3 style="font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--gold);" id="visitor-rules-title">Правила игры</h3><div style="font-size: 11px; color: var(--text-main); line-height: 1.5; margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);" id="visitor-rules-content">Описание правил...</div><button class="btn btn-primary" style="padding: 8px 16px; font-size: 12px; width: 100%; border-radius: 8px; margin: 0; cursor: pointer;" onclick="window.app.closeVisitorRulesModal()">Понятно 👍</button></div>';
+      document.body.appendChild(modal);
+    }
+
+    const iconEl = document.getElementById('visitor-rules-icon');
+    const titleEl = document.getElementById('visitor-rules-title');
+    const contentEl = document.getElementById('visitor-rules-content');
+
+    if (iconEl) iconEl.innerText = gRule.icon;
+    if (titleEl) titleEl.innerText = gRule.title;
+    if (contentEl) contentEl.innerHTML = gRule.text;
+
+    modal.classList.add('active');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '9999999';
+    modal.style.visibility = 'visible';
+    modal.style.opacity = '1';
+  }
+
+  closeVisitorRulesModal() {
+    const m1 = document.getElementById('game-rules-modal');
+    if (m1) {
+      m1.classList.remove('active');
+      m1.style.display = 'none';
+      m1.style.visibility = 'hidden';
+    }
+    const m2 = document.getElementById('visitor-rules-modal');
+    if (m2) {
+      m2.classList.remove('active');
+      m2.style.display = 'none';
+      m2.style.visibility = 'hidden';
+    }
+  }
+}
 
 // Instantiate
 const app = new WaitPlayApp();
 window.app = app;
+window.showGameRules = (gId, ev) => window.app.showGameRules(gId, ev);
+window.closeVisitorRulesModal = () => window.app.closeVisitorRulesModal();
 
 function initWaitPlayApp() {
   try {
