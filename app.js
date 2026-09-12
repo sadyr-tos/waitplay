@@ -6218,6 +6218,10 @@ class WaitPlayApp {
       if (Number(data.gameId) === 4) {
         this.handleRemoteTTFMove(data);
       }
+    } else if (data.type === 'ttt_timeout') {
+      if (Number(data.gameId) === 4) {
+        this.handleRemoteTTFTimeout(data);
+      }
     } else if (data.type === 'ttt_rematch' || data.type === 'game_restart') {
       if (Number(data.gameId) === 4) {
         this.handleRemoteTTFRestart(data);
@@ -6261,12 +6265,19 @@ class WaitPlayApp {
     }
   }
 
-  visitorExitActiveGame() {
+    visitorExitActiveGame() {
     try {
       const exitingGameId = this.state.visitorSelectedGameId || 4;
       this.state.visitorSelectedGameId = null;
       this.state.visitorActiveView = 'lobby';
       
+      clearInterval(this.state.lobbyCountdown);
+      clearInterval(this.tttTurnTimerInterval);
+      this.state.tttTournament = null;
+      this.activeQueueEndTime = null;
+      this.activeRoomQueue = null;
+      this.queuePlayers = {};
+
       if (this.roomStatus && this.roomStatus[exitingGameId]) {
         this.roomStatus[exitingGameId] = { busy: false };
       }
@@ -6358,7 +6369,7 @@ class WaitPlayApp {
     });
   }
 
-    visitorJoinLobby(gameId) {
+      visitorJoinLobby(gameId) {
     try {
       const gId = Number(gameId);
       this.ensureMyPlayerProfile();
@@ -6375,6 +6386,14 @@ class WaitPlayApp {
       this.state.visitorSelectedGameId = gId;
       this.saveState();
 
+      // Clean previous game & timer state completely
+      clearInterval(this.state.lobbyCountdown);
+      clearInterval(this.tttTurnTimerInterval);
+      this.state.tttTournament = null;
+      this.activeQueueEndTime = null;
+      this.activeRoomQueue = null;
+      this.queuePlayers = {};
+
       // Synchronized 15-second room timer
       let queueEndTime = Date.now() + 15000;
       if (this.activeRoomQueue && Number(this.activeRoomQueue.gameId) === gId && this.activeRoomQueue.queueEndTime > Date.now()) {
@@ -6383,7 +6402,6 @@ class WaitPlayApp {
       this.activeQueueEndTime = queueEndTime;
       this.myQueueJoinTime = Date.now();
 
-      this.queuePlayers = this.queuePlayers || {};
       this.queuePlayers[this.myPlayerId] = {
         ...this.myPlayerProfile,
         id: this.myPlayerId,
@@ -6404,7 +6422,7 @@ class WaitPlayApp {
           </div>
           <div id="lobby-countdown-label" style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:4px;">Набор игроков:</div>
           <div id="lobby-countdown-timer" style="font-size:24px; font-weight:900; color:var(--gold); margin-bottom:10px;">${remainingSec} сек</div>
-          <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: ${Object.keys(this.queuePlayers).length} чел.</div>
+          <div id="visitor-lobby-players-count" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:15px;">👥 В очереди: 1 чел.</div>
           <button class="btn btn-secondary" style="padding:6px 14px; font-size:11px; width:auto; margin:0;" onclick="window.app.visitorLeaveQueue()">Отмена ✖</button>
         `;
       }
@@ -6412,7 +6430,6 @@ class WaitPlayApp {
       this.updateLiveQueueUI();
       this.broadcastNetworkPresence();
 
-      // Announce join with synchronized queueEndTime
       this.sendNetworkMessage({
         type: 'queue_join',
         gameId: gId,
@@ -6421,7 +6438,6 @@ class WaitPlayApp {
       });
 
       // Synchronized ticker
-      clearInterval(this.state.lobbyCountdown);
       this.state.lobbyCountdown = setInterval(() => {
         const remaining = Math.max(0, Math.ceil((this.activeQueueEndTime - Date.now()) / 1000));
 
@@ -6629,6 +6645,7 @@ class WaitPlayApp {
 
   initTTFTournament(isNextRound = false) {
     this.ensureMyPlayerProfile();
+    clearInterval(this.tttTurnTimerInterval);
 
     let currentRound = 1;
     let scoreX = 0;
@@ -6660,7 +6677,8 @@ class WaitPlayApp {
       const amIHost = (this.myPlayerId <= other.id);
       isHost = amIHost;
       
-      // In odd rounds: Host is X, Guest is O. In even rounds: Guest is X, Host is O (fair alternation)
+      // In odd rounds: Host is X (moves 1st), Guest is O (moves 2nd).
+      // In even rounds: Guest is X (moves 1st), Host is O (moves 2nd).
       if (currentRound % 2 === 1) {
         mySymbol = amIHost ? 'X' : 'O';
         oppSymbol = amIHost ? 'O' : 'X';
@@ -6709,6 +6727,89 @@ class WaitPlayApp {
     if (scoreEl) scoreEl.innerText = `Раунд ${currentRound}`;
 
     this.renderActiveGameQuestion();
+    this.startTTFTurnTimer();
+  }
+
+  startTTFTurnTimer() {
+    clearInterval(this.tttTurnTimerInterval);
+    const t = this.state.tttTournament;
+    if (!t || t.status !== 'playing' || t.winner) return;
+
+    const branch = this.getVisitorConnectedBranch();
+    const turnLimitRaw = (branch && branch.tttTurnLimit) ? branch.tttTurnLimit : (this.state.tttTurnLimit || 'none');
+    if (turnLimitRaw === 'none' || !turnLimitRaw) {
+      this.tttTurnSecondsLeft = null;
+      return;
+    }
+
+    const limitSec = parseInt(turnLimitRaw, 10);
+    if (isNaN(limitSec) || limitSec <= 0) {
+      this.tttTurnSecondsLeft = null;
+      return;
+    }
+
+    this.tttTurnSecondsLeft = limitSec;
+
+    this.tttTurnTimerInterval = setInterval(() => {
+      const curT = this.state.tttTournament;
+      if (!curT || curT.status !== 'playing' || curT.winner) {
+        clearInterval(this.tttTurnTimerInterval);
+        return;
+      }
+
+      this.tttTurnSecondsLeft--;
+
+      let countX = 0, countO = 0;
+      curT.board.forEach(cell => {
+        if (cell === 'X') countX++;
+        if (cell === 'O') countO++;
+      });
+      const activeTurnSymbol = (countX === countO) ? 'X' : 'O';
+      const isMyTurn = (activeTurnSymbol === curT.mySymbol);
+
+      const timerBadge = document.getElementById('ttt-turn-countdown-badge');
+      if (timerBadge) {
+        timerBadge.innerText = `⏱️ ${Math.max(0, this.tttTurnSecondsLeft)} сек`;
+        if (this.tttTurnSecondsLeft <= 3) {
+          timerBadge.style.color = '#ef4444';
+        } else {
+          timerBadge.style.color = '#fbbf24';
+        }
+      }
+
+      if (this.tttTurnSecondsLeft <= 0) {
+        clearInterval(this.tttTurnTimerInterval);
+        if (isMyTurn) {
+          this.showVisitorToast("⏰ Время на ход истекло! Раунд присуждён сопернику.", true);
+          const winSymbol = curT.oppSymbol;
+          curT.winner = winSymbol;
+          if (winSymbol === 'X') curT.scoreX++;
+          if (winSymbol === 'O') curT.scoreO++;
+          this.sendNetworkMessage({
+            type: 'ttt_timeout',
+            gameId: 4,
+            timedOutPlayerId: this.myPlayerId,
+            winnerSymbol: winSymbol,
+            scoreX: curT.scoreX,
+            scoreO: curT.scoreO
+          });
+          this.finishTTFMatch(winSymbol);
+        }
+      }
+    }, 1000);
+  }
+
+  handleRemoteTTFTimeout(data) {
+    const t = this.state.tttTournament;
+    if (!t || Number(data.gameId) !== 4) return;
+    clearInterval(this.tttTurnTimerInterval);
+    
+    const winSymbol = data.winnerSymbol || (t.mySymbol);
+    t.winner = winSymbol;
+    t.scoreX = data.scoreX || t.scoreX;
+    t.scoreO = data.scoreO || t.scoreO;
+    this.showVisitorToast("⏰ У соперника истекло время на ход! Победа в раунде!", false);
+    this.finishTTFMatch(winSymbol);
   }
 
   handleRemoteTTFJoin(data) {
@@ -6730,6 +6831,7 @@ class WaitPlayApp {
     });
 
     this.renderActiveGameQuestion();
+    this.startTTFTurnTimer();
   }
 
   handleRemoteTTFPaired(data) {
@@ -6759,6 +6861,7 @@ class WaitPlayApp {
     t.status = 'playing';
 
     this.renderActiveGameQuestion();
+    this.startTTFTurnTimer();
   }
 
   renderTTFBoard(optionsBox, textLabel) {
@@ -6768,7 +6871,6 @@ class WaitPlayApp {
       return;
     }
 
-    // Active turn is determined by board count (X always moves first in the round)
     let countX = 0, countO = 0;
     t.board.forEach(cell => {
       if (cell === 'X') countX++;
@@ -6780,6 +6882,10 @@ class WaitPlayApp {
     const isMyTurn = (!isWaiting && !t.winner && activeTurnSymbol === t.mySymbol);
 
     let turnBanner = '';
+    const timerText = (this.tttTurnSecondsLeft !== null && this.tttTurnSecondsLeft !== undefined) 
+      ? `<span id="ttt-turn-countdown-badge" style="display:inline-block; margin-left:6px; font-size:12px; font-weight:800; color:var(--gold);">⏱️ ${this.tttTurnSecondsLeft} сек</span>`
+      : '';
+
     if (isWaiting) {
       turnBanner = `
         <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 8px 12px; border-radius: 10px; color: var(--gold); font-weight: 800; font-size: 13px; animation: pulse 1.5s infinite;">
@@ -6790,12 +6896,12 @@ class WaitPlayApp {
     } else if (isMyTurn) {
       turnBanner = `
         <div style="background: rgba(16, 185, 129, 0.18); border: 1px solid var(--success); padding: 8px 12px; border-radius: 10px; color: var(--success); font-weight: 900; font-size: 13px; box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);">
-          👉 ВАШ ХОД (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'}) — нажмите на свободную клетку!
+          👉 ВАШ ХОД (${t.mySymbol === 'X' ? 'Крестик ❌' : 'Нолик ⭕'}) ${timerText}
         </div>`;
     } else {
       turnBanner = `
         <div style="background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.3); padding: 8px 12px; border-radius: 10px; color: var(--text-muted); font-weight: 700; font-size: 12px;">
-          ⏳ Ход соперника (${t.oppName})... Ожидайте свой черёд
+          ⏳ Ход соперника (${t.oppName}) ${timerText}
         </div>`;
     }
 
@@ -6834,18 +6940,18 @@ class WaitPlayApp {
         if (cell === 'X') {
           btn.innerText = '❌';
           btn.style.borderColor = isWinningCell ? 'var(--gold)' : 'var(--primary)';
-          btn.style.background = isWinningCell ? 'rgba(245, 158, 11, 0.3)' : 'rgba(139, 92, 246, 0.18)';
-          if (isWinningCell) btn.style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.6)';
+          btn.style.background = isWinningCell ? 'rgba(245, 158, 11, 0.35)' : 'rgba(139, 92, 246, 0.18)';
+          if (isWinningCell) btn.style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.7)';
           btn.disabled = true;
         } else if (cell === 'O') {
           btn.innerText = '⭕';
           btn.style.borderColor = isWinningCell ? 'var(--gold)' : 'var(--gold)';
-          btn.style.background = isWinningCell ? 'rgba(245, 158, 11, 0.3)' : 'rgba(245, 158, 11, 0.18)';
-          if (isWinningCell) btn.style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.6)';
+          btn.style.background = isWinningCell ? 'rgba(245, 158, 11, 0.35)' : 'rgba(245, 158, 11, 0.18)';
+          if (isWinningCell) btn.style.boxShadow = '0 0 20px rgba(245, 158, 11, 0.7)';
           btn.disabled = true;
         } else {
           btn.innerText = '';
-          if (isMyTurn) {
+          if (isMyTurn && !t.winner) {
             btn.style.cursor = 'pointer';
             btn.style.borderColor = 'var(--success)';
             btn.style.background = 'rgba(16, 185, 129, 0.08)';
@@ -6856,6 +6962,8 @@ class WaitPlayApp {
             btn.onclick = () => {
               if (isWaiting) {
                 this.showVisitorToast("⏳ Ожидание второго игрока!", true);
+              } else if (t.winner) {
+                this.showVisitorToast("Раунд завершён! Нажмите 'Следующий раунд'.", false);
               } else {
                 this.showVisitorToast("⏳ Сейчас ход соперника! Ожидайте свой черёд.", true);
               }
@@ -6895,18 +7003,25 @@ class WaitPlayApp {
 
     const winResult = this.checkTTFWinner(t.board);
     if (winResult) {
+      clearInterval(this.tttTurnTimerInterval);
       t.winner = winResult.winner;
       t.winningLine = winResult.line;
       if (winResult.winner === 'X') t.scoreX++;
       if (winResult.winner === 'O') t.scoreO++;
       this.finishTTFMatch(winResult.winner);
     } else if (t.board.every(cell => cell !== null)) {
+      clearInterval(this.tttTurnTimerInterval);
       t.winner = 'draw';
       t.drawsCount++;
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
+      this.startTTFTournamentTurn();
     }
+  }
+
+  startTTFTournamentTurn() {
+    this.startTTFTurnTimer();
   }
 
   handleRemoteTTFMove(data) {
@@ -6922,17 +7037,20 @@ class WaitPlayApp {
 
     const winResult = this.checkTTFWinner(t.board);
     if (winResult) {
+      clearInterval(this.tttTurnTimerInterval);
       t.winner = winResult.winner;
       t.winningLine = winResult.line;
       if (winResult.winner === 'X') t.scoreX++;
       if (winResult.winner === 'O') t.scoreO++;
       this.finishTTFMatch(winResult.winner);
     } else if (t.board.every(cell => cell !== null)) {
+      clearInterval(this.tttTurnTimerInterval);
       t.winner = 'draw';
       t.drawsCount++;
       this.finishTTFMatch('draw');
     } else {
       this.renderActiveGameQuestion();
+      this.startTTFTournamentTurn();
     }
   }
 
@@ -6966,15 +7084,19 @@ class WaitPlayApp {
   }
 
   finishTTFMatch(result) {
+    clearInterval(this.tttTurnTimerInterval);
     const textLabel = document.getElementById('visitor-game-question-text');
     const optionsBox = document.getElementById('visitor-game-options');
     const t = this.state.tttTournament;
+
+    // Render completed 9-cell board first
+    this.renderTTFBoard(optionsBox, textLabel);
 
     let resultHtml = '';
     if (result === 'draw') {
       this.showVisitorToast("🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!", false);
       resultHtml = `
-        <div style="text-align:center; padding: 6px 0;">
+        <div style="text-align:center; padding: 4px 0;">
           <h3 style="color:#fff; margin-bottom:4px; font-size:15px; font-weight:800;">🤝 РАУНД ЗАВЕРШИЛСЯ ВНИЧЬЮ!</h3>
           <div style="font-size:12px; color:var(--gold); font-weight:800;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
         </div>
@@ -6982,7 +7104,7 @@ class WaitPlayApp {
     } else if (t && result === t.mySymbol) {
       this.showVisitorToast("🎉 ВЫ ВЫИГРАЛИ ЭТОТ РАУНД!", false);
       resultHtml = `
-        <div style="text-align:center; padding: 6px 0;">
+        <div style="text-align:center; padding: 4px 0;">
           <h3 style="color:var(--success); margin-bottom:4px; font-size:16px; font-weight:900;">🎉 ВЫ ВЫИГРАЛИ РАУНД! 🏆</h3>
           <div style="font-size:12px; color:var(--gold); font-weight:800;">🏆 Счёт серии: ❌ ${t.scoreX} — ⭕ ${t.scoreO}</div>
         </div>
@@ -6990,27 +7112,29 @@ class WaitPlayApp {
     } else {
       this.showVisitorToast("👏 РАУНД ВЫИГРАЛ СОПЕРНИК!", false);
       resultHtml = `
-        <div style="text-align:center; padding: 6px 0;">
+        <div style="text-align:center; padding: 4px 0;">
           <h3 style="color:var(--gold); margin-bottom:4px; font-size:15px; font-weight:800;">👏 Раунд выиграл соперник (${t ? t.oppName : ''})</h3>
           <div style="font-size:12px; color:var(--gold); font-weight:800;">🏆 Счёт серии: ❌ ${t ? t.scoreX : 0} — ⭕ ${t ? t.scoreO : 0}</div>
         </div>
       `;
     }
 
-    if (textLabel) textLabel.innerHTML = resultHtml;
+    if (textLabel) {
+      textLabel.innerHTML = resultHtml;
+    }
 
     if (optionsBox) {
-      optionsBox.innerHTML = `
-        <div style="grid-column: 1 / -1; width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
-          <button class="btn btn-primary" style="width: 100%; padding: 14px; font-weight: 800; font-size: 14px;" onclick="window.app.requestLiveTTFRestart()">
-            🔄 Следующий раунд 🎯
-          </button>
-          <button class="btn btn-secondary" style="width: 100%; padding: 11px; font-size: 12px; font-weight: 700;" onclick="window.app.visitorExitActiveGame()">
-            🚪 Вернуться в Лобби
-          </button>
-        </div>
+      const rematchContainer = document.createElement('div');
+      rematchContainer.style.cssText = 'grid-column: 1 / -1; width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 12px;';
+      rematchContainer.innerHTML = `
+        <button class="btn btn-primary" style="width: 100%; padding: 14px; font-weight: 800; font-size: 14px; border-radius: 12px;" onclick="window.app.requestLiveTTFRestart()">
+          🔄 Следующий раунд 🎯
+        </button>
+        <button class="btn btn-secondary" style="width: 100%; padding: 11px; font-size: 12px; font-weight: 700; border-radius: 10px;" onclick="window.app.visitorExitActiveGame()">
+          🚪 Вернуться в Лобби
+        </button>
       `;
-      optionsBox.style.display = 'block';
+      optionsBox.appendChild(rematchContainer);
     }
   }
 
